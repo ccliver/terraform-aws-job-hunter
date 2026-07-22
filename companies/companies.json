@@ -22,7 +22,6 @@
   {"company_name": "Twilio", "careers_url": "https://boards-api.greenhouse.io/v1/boards/twilio/jobs", "ats": "greenhouse"},
   {"company_name": "Samsara", "careers_url": "https://boards-api.greenhouse.io/v1/boards/samsara/jobs", "ats": "greenhouse"},
   {"company_name": "CACI International", "careers_url": "https://caci.wd1.myworkdayjobs.com/External", "ats": "workday"},
-  {"company_name": "GDIT", "careers_url": "https://gdit.wd5.myworkdayjobs.com/External_Career_Site", "ats": "workday"},
   {"company_name": "CrowdStrike", "careers_url": "https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers", "ats": "workday"},
   {"company_name": "Okta", "careers_url": "https://boards-api.greenhouse.io/v1/boards/okta/jobs", "ats": "greenhouse"},
   {"company_name": "New Relic", "careers_url": "https://boards-api.greenhouse.io/v1/boards/newrelic/jobs", "ats": "greenhouse"},
