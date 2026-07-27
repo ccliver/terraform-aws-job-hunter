@@ -301,84 +301,103 @@ resource "aws_dynamodb_table" "jobs" {
 }
 
 
-resource "aws_cloudwatch_event_rule" "orchestrator_weekday" {
-  name                = "${local.prefix}-orchestrator-weekday-schedule"
-  description         = "Triggers the Orchestrator Lambda every 2 hours on weekdays"
-  schedule_expression = var.orchestrator_weekday_schedule
+data "aws_iam_policy_document" "scheduler_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["scheduler.amazonaws.com"]
+    }
+  }
 }
 
-resource "aws_cloudwatch_event_target" "orchestrator_weekday" {
-  rule      = aws_cloudwatch_event_rule.orchestrator_weekday.name
-  target_id = "orchestrator-lambda-weekday"
-  arn       = aws_lambda_function.orchestrator.arn
+resource "aws_iam_role" "scheduler" {
+  name               = "${local.prefix}-scheduler"
+  assume_role_policy = data.aws_iam_policy_document.scheduler_assume_role.json
 }
 
-resource "aws_lambda_permission" "orchestrator_eventbridge_weekday" {
-  statement_id  = "AllowEventBridgeInvokeOrchestratorWeekday"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.orchestrator.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.orchestrator_weekday.arn
+resource "aws_iam_role_policy" "scheduler" {
+  name = "${local.prefix}-scheduler-policy"
+  role = aws_iam_role.scheduler.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "InvokeOrchestratorAndNotifier"
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
+        Resource = [
+          aws_lambda_function.orchestrator.arn,
+          aws_lambda_function.notifier.arn
+        ]
+      }
+    ]
+  })
 }
 
-resource "aws_cloudwatch_event_rule" "orchestrator_weekend" {
-  name                = "${local.prefix}-orchestrator-weekend-schedule"
-  description         = "Triggers the Orchestrator Lambda once daily on weekends"
-  schedule_expression = var.orchestrator_weekend_schedule
+# Uses EventBridge Scheduler (not classic EventBridge Rules) so schedule_expression_timezone
+# can express these cron times in America/New_York directly — Scheduler handles the DST
+# transition automatically, where a plain UTC cron() on a Rule would need manual adjustment
+# twice a year.
+resource "aws_scheduler_schedule" "orchestrator_weekday" {
+  name                         = "${local.prefix}-orchestrator-weekday-schedule"
+  schedule_expression          = var.orchestrator_weekday_schedule
+  schedule_expression_timezone = var.schedule_timezone
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_lambda_function.orchestrator.arn
+    role_arn = aws_iam_role.scheduler.arn
+  }
 }
 
-resource "aws_cloudwatch_event_target" "orchestrator_weekend" {
-  rule      = aws_cloudwatch_event_rule.orchestrator_weekend.name
-  target_id = "orchestrator-lambda-weekend"
-  arn       = aws_lambda_function.orchestrator.arn
+resource "aws_scheduler_schedule" "orchestrator_weekend" {
+  name                         = "${local.prefix}-orchestrator-weekend-schedule"
+  schedule_expression          = var.orchestrator_weekend_schedule
+  schedule_expression_timezone = var.schedule_timezone
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_lambda_function.orchestrator.arn
+    role_arn = aws_iam_role.scheduler.arn
+  }
 }
 
-resource "aws_lambda_permission" "orchestrator_eventbridge_weekend" {
-  statement_id  = "AllowEventBridgeInvokeOrchestratorWeekend"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.orchestrator.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.orchestrator_weekend.arn
+resource "aws_scheduler_schedule" "notifier_weekday" {
+  name                         = "${local.prefix}-notifier-weekday-schedule"
+  schedule_expression          = var.notifier_weekday_schedule
+  schedule_expression_timezone = var.schedule_timezone
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_lambda_function.notifier.arn
+    role_arn = aws_iam_role.scheduler.arn
+  }
 }
 
-resource "aws_cloudwatch_event_rule" "notifier_weekday" {
-  name                = "${local.prefix}-notifier-weekday-schedule"
-  description         = "Triggers the Notifier Lambda 30 minutes after each weekday Orchestrator run"
-  schedule_expression = var.notifier_weekday_schedule
-}
+resource "aws_scheduler_schedule" "notifier_weekend" {
+  name                         = "${local.prefix}-notifier-weekend-schedule"
+  schedule_expression          = var.notifier_weekend_schedule
+  schedule_expression_timezone = var.schedule_timezone
 
-resource "aws_cloudwatch_event_target" "notifier_weekday" {
-  rule      = aws_cloudwatch_event_rule.notifier_weekday.name
-  target_id = "notifier-lambda-weekday"
-  arn       = aws_lambda_function.notifier.arn
-}
+  flexible_time_window {
+    mode = "OFF"
+  }
 
-resource "aws_lambda_permission" "notifier_eventbridge_weekday" {
-  statement_id  = "AllowEventBridgeInvokeNotifierWeekday"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.notifier.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.notifier_weekday.arn
-}
-
-resource "aws_cloudwatch_event_rule" "notifier_weekend" {
-  name                = "${local.prefix}-notifier-weekend-schedule"
-  description         = "Triggers the Notifier Lambda 30 minutes after the weekend Orchestrator run"
-  schedule_expression = var.notifier_weekend_schedule
-}
-
-resource "aws_cloudwatch_event_target" "notifier_weekend" {
-  rule      = aws_cloudwatch_event_rule.notifier_weekend.name
-  target_id = "notifier-lambda-weekend"
-  arn       = aws_lambda_function.notifier.arn
-}
-
-resource "aws_lambda_permission" "notifier_eventbridge_weekend" {
-  statement_id  = "AllowEventBridgeInvokeNotifierWeekend"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.notifier.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.notifier_weekend.arn
+  target {
+    arn      = aws_lambda_function.notifier.arn
+    role_arn = aws_iam_role.scheduler.arn
+  }
 }
 
 

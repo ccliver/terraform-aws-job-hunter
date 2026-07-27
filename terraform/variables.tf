@@ -38,6 +38,12 @@ variable "notifier_weekend_schedule" {
   default     = "cron(30 8 ? * SAT-SUN *)"
 }
 
+variable "schedule_timezone" {
+  description = "IANA timezone the schedule cron expressions are evaluated in (EventBridge Scheduler handles DST automatically)"
+  type        = string
+  default     = "America/New_York"
+}
+
 variable "lookback_minutes" {
   description = "Minutes the Notifier looks back when querying for new jobs"
   type        = number
