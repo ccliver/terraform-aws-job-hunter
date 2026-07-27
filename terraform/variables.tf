@@ -14,16 +14,28 @@ variable "ses_to_address" {
   type        = string
 }
 
-variable "orchestrator_schedule" {
-  description = "EventBridge cron expression for the Orchestrator Lambda"
+variable "orchestrator_weekday_schedule" {
+  description = "EventBridge cron expression for the Orchestrator Lambda on weekdays"
   type        = string
-  default     = "cron(0 9 * * ? *)" # 09:00 UTC daily
+  default     = "cron(0 8-18/2 ? * MON-FRI *)" # every 2 hrs, 8am-6pm UTC, Mon-Fri
 }
 
-variable "notifier_schedule" {
-  description = "EventBridge cron expression for the Notifier Lambda (30 min after orchestrator)"
+variable "orchestrator_weekend_schedule" {
+  description = "EventBridge cron expression for the Orchestrator Lambda on weekends"
   type        = string
-  default     = "cron(30 9 * * ? *)" # 09:30 UTC daily
+  default     = "cron(0 8 ? * SAT-SUN *)" # once at 8am UTC, Sat-Sun
+}
+
+variable "notifier_weekday_schedule" {
+  description = "EventBridge cron expression for the Notifier Lambda on weekdays (30 min after orchestrator)"
+  type        = string
+  default     = "cron(30 8-18/2 ? * MON-FRI *)"
+}
+
+variable "notifier_weekend_schedule" {
+  description = "EventBridge cron expression for the Notifier Lambda on weekends (30 min after orchestrator)"
+  type        = string
+  default     = "cron(30 8 ? * SAT-SUN *)"
 }
 
 variable "lookback_minutes" {
