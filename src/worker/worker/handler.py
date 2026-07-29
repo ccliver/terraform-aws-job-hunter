@@ -20,13 +20,14 @@ Environment variables expected:
     JOBS_TABLE      - DynamoDB table name for job postings
     COMPANIES_TABLE - DynamoDB table name for tracked companies (used by the
                        builtin ATS backend to skip already-tracked companies)
-    LOCATION          - Location substring to additionally keep for every ATS
-                         backend except builtin (defaults to "" — disabled,
-                         i.e. remote-only)
+    LOCATION          - Comma-separated location substrings to additionally
+                         keep (OR'd together) for every ATS backend except
+                         builtin (defaults to "" — disabled, i.e. remote-only)
     WORK_TYPE         - Work-type keyword to keep for every ATS backend except
                          builtin: "remote", "hybrid", "office", "any", or any
                          other literal substring to match (defaults to "remote")
-    BUILTIN_LOCATION  - Same as LOCATION, but for the builtin ATS backend only
+    BUILTIN_LOCATION  - Same as LOCATION (also comma-separated), but for the
+                         builtin ATS backend only
                          — independent setting (defaults to "" — disabled)
     BUILTIN_WORK_TYPE - Same as WORK_TYPE, but for the builtin ATS backend only
                          — independent setting (defaults to "remote")
@@ -610,26 +611,31 @@ def _work_type_matches(
 ) -> bool:
     """Shared implementation behind _location_matches and _builtin_location_matches.
 
-    A job is kept if its location contains the configured target location
-    substring, or its location indicates the configured work type (or the
-    work type env var is "any", or its value isn't a recognised keyword, in
-    which case it's matched literally as a substring too). If the work type
-    is "any" and no target location is configured, the whole check is
-    disabled and every job passes, blank location included. Otherwise an
-    empty location fails the match — this filter narrows down to a specific
-    set, unlike the fail-open non-US location filter.
+    A job is kept if its location contains any of the configured target
+    location substrings (location_env_var: comma-separated, OR'd together —
+    e.g. "VA,Virginia,DC" to catch both abbreviated and spelled-out state
+    names across ATS backends that format locations differently), or its
+    location indicates the configured work type (or the work type env var is
+    "any", or its value isn't a recognised keyword, in which case it's
+    matched literally as a substring too). If the work type is "any" and no
+    target locations are configured, the whole check is disabled and every
+    job passes, blank location included. Otherwise an empty location fails
+    the match — this filter narrows down to a specific set, unlike the
+    fail-open non-US location filter.
     """
-    target_location = os.environ.get(location_env_var, default_location)
+    target_locations = [
+        loc.strip().lower() for loc in os.environ.get(location_env_var, default_location).split(",") if loc.strip()
+    ]
     work_type = os.environ.get(work_type_env_var, default_work_type).lower()
 
-    if not target_location and work_type == "any":
+    if not target_locations and work_type == "any":
         return True
 
     if not location:
         return False
     location_lower = location.lower()
 
-    if target_location and target_location.lower() in location_lower:
+    if any(target in location_lower for target in target_locations):
         return True
     if work_type == "any":
         return True

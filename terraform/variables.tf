@@ -63,9 +63,9 @@ variable "builtin_work_type" {
 }
 
 variable "location" {
-  description = "Location substring to additionally keep for every ATS backend except builtin; blank disables it (remote-only). Independent of builtin_location"
+  description = "Comma-separated location substrings (OR'd together) to additionally keep for every ATS backend except builtin; blank disables it (remote-only). Independent of builtin_location"
   type        = string
-  default     = "VA"
+  default     = "VA,Virginia,DC"
 }
 
 variable "work_type" {

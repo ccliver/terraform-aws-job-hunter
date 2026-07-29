@@ -1162,6 +1162,21 @@ def test_location_matches_custom_location_env(monkeypatch: pytest.MonkeyPatch) -
     assert _location_matches("Reston, VA, USA") is True
 
 
+def test_location_matches_multiple_comma_separated_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LOCATION should OR together comma-separated substrings.
+
+    Mirrors a real gap: Greenhouse spells out full state names ("McLean,
+    Virginia") while Workday abbreviates ("US - VA, McLean"), so a single
+    "VA" substring misses Greenhouse-sourced Virginia postings entirely.
+    """
+    monkeypatch.setenv("LOCATION", "VA,Virginia,DC")
+    assert _location_matches("McLean, Virginia") is True
+    assert _location_matches("US - VA, McLean") is True
+    assert _location_matches("Washington, DC") is True
+    assert _location_matches("DC-Washington-TWP Headquarters") is True
+    assert _location_matches("Seattle, Washington") is False
+
+
 def test_location_matches_custom_work_type_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """_location_matches should honor a custom WORK_TYPE, independent of BUILTIN_WORK_TYPE."""
     monkeypatch.setenv("WORK_TYPE", "hybrid")
