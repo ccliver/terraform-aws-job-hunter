@@ -81,18 +81,6 @@ resource "aws_iam_role_policy" "worker" {
         Resource = aws_sqs_queue.worker.arn
       },
       {
-        Sid      = "ECRPullImage"
-        Effect   = "Allow"
-        Action   = ["ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"]
-        Resource = aws_ecr_repository.worker.arn
-      },
-      {
-        Sid      = "ECRGetAuthToken"
-        Effect   = "Allow"
-        Action   = ["ecr:GetAuthorizationToken"]
-        Resource = "*"
-      },
-      {
         Sid      = "CloudWatchLogs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
@@ -164,12 +152,14 @@ resource "aws_cloudwatch_log_group" "orchestrator" {
 }
 
 resource "aws_lambda_function" "worker" {
-  function_name = "${local.prefix}-worker"
-  role          = aws_iam_role.worker.arn
-  package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.worker.repository_url}:latest"
-  timeout       = var.lambda_timeout_seconds
-  memory_size   = var.worker_memory_mb
+  function_name    = "${local.prefix}-worker"
+  role             = aws_iam_role.worker.arn
+  handler          = "worker.handler.handler"
+  runtime          = "python3.13"
+  filename         = "${path.module}/.build/worker.zip"
+  source_code_hash = filebase64sha256("${path.module}/.build/worker.zip")
+  timeout          = var.lambda_timeout_seconds
+  memory_size      = var.worker_memory_mb
 
   environment {
     variables = {
@@ -397,19 +387,5 @@ resource "aws_scheduler_schedule" "notifier_weekend" {
   target {
     arn      = aws_lambda_function.notifier.arn
     role_arn = aws_iam_role.scheduler.arn
-  }
-}
-
-
-resource "aws_ecr_repository" "worker" {
-  name                 = "${local.prefix}-worker"
-  image_tag_mutability = "MUTABLE" #trivy:ignore:AWS-0031
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = {
-    Name = "${local.prefix}-worker"
   }
 }

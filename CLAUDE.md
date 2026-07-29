@@ -82,7 +82,7 @@ task destroy                     # terraform destroy
 - All resources use `local.prefix` (`"job-hunter"`) for naming.
 - Single deployment target — no environment variable, no workspaces.
 - Backend config is in `backend.hcl` (gitignored, account-specific) and passed via `terraform init -backend-config=backend.hcl`.
-- Lambda ZIPs for orchestrator/notifier are built by `task build` (pip-installs dependencies into `terraform/.build/{name}`, then zips); `main.tf` just references the resulting `.build/*.zip` via `filebase64sha256` for `source_code_hash`. The worker ships as a container image instead (`task build-worker`: build, push to ECR, then `aws lambda update-function-code` — the Lambda resource's `image_uri` is a static `:latest` tag Terraform never sees change, so that explicit CLI call is what actually deploys new worker code).
+- Lambda ZIPs for all three functions (orchestrator, worker, notifier) are built by `task build` (pip-installs dependencies into `terraform/.build/{name}`, then zips); `main.tf` just references the resulting `.build/*.zip` via `filebase64sha256` for `source_code_hash`. The worker previously shipped as a container image (needed for a since-removed Playwright + Bedrock dependency — see the `worker/handler.py` note above); it was converted back to a plain zip package once that dependency was gone, dropping the ECR repository and the manual `aws lambda update-function-code` deploy step entirely.
 - IAM policies follow least-privilege per Lambda.
 - SQS queues use `sqs_managed_sse_enabled = true`.
 - DynamoDB tables use `PAY_PER_REQUEST` billing.

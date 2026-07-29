@@ -56,7 +56,6 @@ job-hunter/
 │   │   └── tests/
 │   │       └── test_handler.py
 │   ├── worker/
-│   │   ├── Dockerfile          # container image Lambda
 │   │   ├── pyproject.toml
 │   │   ├── worker/
 │   │   │   └── handler.py
@@ -69,7 +68,7 @@ job-hunter/
 │       └── tests/
 │           └── test_handler.py
 └── terraform/
-    ├── main.tf                 # all resources (IAM, Lambda, SQS, DynamoDB, ECR, EventBridge)
+    ├── main.tf                 # all resources (IAM, Lambda, SQS, DynamoDB, EventBridge)
     ├── versions.tf
     ├── providers.tf
     ├── backend.tf
@@ -122,7 +121,7 @@ ses_to_address   = "you@yourdomain.com"
 EOF
 
 # 3. Deploy
-task apply    # terraform init + apply (creates ECR, builds & pushes worker image, then full apply)
+task apply    # builds all Lambda ZIPs, then terraform init + apply
 ```
 
 ### Task reference
@@ -131,23 +130,19 @@ task apply    # terraform init + apply (creates ECR, builds & pushes worker imag
 |------|-------------|
 | `task apply` | Build all artifacts and deploy infrastructure |
 | `task destroy` | Destroy all infrastructure |
-| `task build` | Build orchestrator and notifier Lambda ZIPs |
-| `task build-worker` | Build and push the worker container image to ECR |
-| `task ecr-login` | Authenticate Docker to ECR |
+| `task build` | Build orchestrator, worker, and notifier Lambda ZIPs |
 | `task invoke` | Full end-to-end test: orchestrator → workers → notifier |
 | `task logs-worker` | Print the worker Lambda's most recent CloudWatch log streams |
 | `task seed` | Seed the DynamoDB companies table from `companies/companies.json` |
 | `task flush-jobs` | Delete all items from the DynamoDB jobs table |
 | `task dynamo-disable-protection` | Disable deletion protection on the companies table (run before `destroy`) |
-| `task ecr-delete-images` | Delete all images from the worker ECR repository (run before `destroy`) |
 
 ### Teardown
 
-DynamoDB deletion protection and a non-empty ECR repository will cause `terraform destroy` to fail. Run these first:
+DynamoDB deletion protection will cause `terraform destroy` to fail. Run this first:
 
 ```bash
 task dynamo-disable-protection
-task ecr-delete-images
 task destroy
 ```
 

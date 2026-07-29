@@ -37,5 +37,7 @@
   {"company_name": "Comscore", "careers_url": "https://comscore.wd5.myworkdayjobs.com/External", "ats": "workday"},
   {"company_name": "Two Six Technologies", "careers_url": "https://boards-api.greenhouse.io/v1/boards/twosixtechnologies/jobs", "ats": "greenhouse"},
   {"company_name": "Washington Post", "careers_url": "https://washpost.wd5.myworkdayjobs.com/washingtonpostcareers", "ats": "workday"},
-  {"company_name": "IMF", "careers_url": "https://imf.wd5.myworkdayjobs.com/IMF", "ats": "workday"}
+  {"company_name": "IMF", "careers_url": "https://imf.wd5.myworkdayjobs.com/IMF", "ats": "workday"},
+  {"company_name": "Fannie Mae", "careers_url": "https://fanniemae.wd1.myworkdayjobs.com/FannieMaeCareers", "ats": "workday"},
+  {"company_name": "Nava PBC", "careers_url": "https://boards-api.greenhouse.io/v1/boards/navapbc/jobs", "ats": "greenhouse"}
 ]

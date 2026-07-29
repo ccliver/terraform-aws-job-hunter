@@ -25,7 +25,6 @@ No modules.
 | [aws_cloudwatch_log_group.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_dynamodb_table.companies](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dynamodb_table) | resource |
 | [aws_dynamodb_table.jobs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dynamodb_table) | resource |
-| [aws_ecr_repository.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecr_repository) | resource |
 | [aws_iam_role.notifier](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.orchestrator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.scheduler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
@@ -78,7 +77,6 @@ No modules.
 | <a name="output_notifier_lambda_arn"></a> [notifier\_lambda\_arn](#output\_notifier\_lambda\_arn) | ARN of the Notifier Lambda |
 | <a name="output_orchestrator_lambda_arn"></a> [orchestrator\_lambda\_arn](#output\_orchestrator\_lambda\_arn) | ARN of the Orchestrator Lambda |
 | <a name="output_worker_dlq_url"></a> [worker\_dlq\_url](#output\_worker\_dlq\_url) | SQS dead-letter queue URL for failed Worker messages |
-| <a name="output_worker_ecr_repository_url"></a> [worker\_ecr\_repository\_url](#output\_worker\_ecr\_repository\_url) | ECR repository URL for the Worker container image |
 | <a name="output_worker_lambda_arn"></a> [worker\_lambda\_arn](#output\_worker\_lambda\_arn) | ARN of the Worker Lambda |
 | <a name="output_worker_queue_url"></a> [worker\_queue\_url](#output\_worker\_queue\_url) | SQS queue URL for the Worker Lambda |
 <!-- END_TF_DOCS -->
