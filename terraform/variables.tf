@@ -65,7 +65,7 @@ variable "builtin_work_type" {
 variable "location" {
   description = "Location substring to additionally keep for every ATS backend except builtin; blank disables it (remote-only). Independent of builtin_location"
   type        = string
-  default     = ""
+  default     = "VA"
 }
 
 variable "work_type" {

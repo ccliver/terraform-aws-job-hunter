@@ -56,7 +56,7 @@ No modules.
 | <a name="input_builtin_work_type"></a> [builtin\_work\_type](#input\_builtin\_work\_type) | Work-type keyword to keep for the Built In ATS backend (remote, hybrid, office, any, or any literal substring) | `string` | `"remote"` | no |
 | <a name="input_lambda_memory_mb"></a> [lambda\_memory\_mb](#input\_lambda\_memory\_mb) | Lambda function memory in MB (orchestrator and notifier) | `number` | `512` | no |
 | <a name="input_lambda_timeout_seconds"></a> [lambda\_timeout\_seconds](#input\_lambda\_timeout\_seconds) | Lambda function timeout in seconds | `number` | `300` | no |
-| <a name="input_location"></a> [location](#input\_location) | Location substring to additionally keep for every ATS backend except builtin; blank disables it (remote-only). Independent of builtin\_location | `string` | `""` | no |
+| <a name="input_location"></a> [location](#input\_location) | Location substring to additionally keep for every ATS backend except builtin; blank disables it (remote-only). Independent of builtin\_location | `string` | `"VA"` | no |
 | <a name="input_lookback_minutes"></a> [lookback\_minutes](#input\_lookback\_minutes) | Minutes the Notifier looks back when querying for new jobs | `number` | `60` | no |
 | <a name="input_notifier_weekday_schedule"></a> [notifier\_weekday\_schedule](#input\_notifier\_weekday\_schedule) | EventBridge cron expression for the Notifier Lambda on weekdays (30 min after orchestrator) | `string` | `"cron(30 8-18/2 ? * MON-FRI *)"` | no |
 | <a name="input_notifier_weekend_schedule"></a> [notifier\_weekend\_schedule](#input\_notifier\_weekend\_schedule) | EventBridge cron expression for the Notifier Lambda on weekends (30 min after orchestrator) | `string` | `"cron(30 8 ? * SAT-SUN *)"` | no |

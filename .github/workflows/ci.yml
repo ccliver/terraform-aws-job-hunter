@@ -51,8 +51,8 @@ jobs:
         # its own interpreter without exposing a normal pip, and uv-managed
         # venvs don't ship pip by default — `uv pip install` was tried as a
         # replacement but it enforces --only-binary against the local
-        # orchestrator/notifier source packages too (pip only enforces it
-        # for index-resolved packages), which breaks the local package build.
+        # orchestrator/worker/notifier source packages too (pip only enforces
+        # it for index-resolved packages), which breaks the local package build.
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -62,7 +62,7 @@ jobs:
         # via filebase64sha256 for source_code_hash, and terraform/.build/ is
         # gitignored (built on demand by `task build`/`task apply`).
         run: |
-          for pkg in orchestrator notifier; do
+          for pkg in orchestrator worker notifier; do
             rm -rf terraform/.build/$pkg
             pip3 install --quiet \
               --platform manylinux2014_x86_64 \
