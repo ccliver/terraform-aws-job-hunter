@@ -32,3 +32,8 @@ output "notifier_lambda_arn" {
   description = "ARN of the Notifier Lambda"
   value       = aws_lambda_function.notifier.arn
 }
+
+output "dashboard_url" {
+  description = "Console URL for the CloudWatch overview dashboard"
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.overview.dashboard_name}"
+}

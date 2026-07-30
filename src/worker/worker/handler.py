@@ -612,16 +612,19 @@ def _work_type_matches(
     """Shared implementation behind _location_matches and _builtin_location_matches.
 
     A job is kept if its location contains any of the configured target
-    location substrings (location_env_var: comma-separated, OR'd together —
-    e.g. "VA,Virginia,DC" to catch both abbreviated and spelled-out state
-    names across ATS backends that format locations differently), or its
-    location indicates the configured work type (or the work type env var is
-    "any", or its value isn't a recognised keyword, in which case it's
-    matched literally as a substring too). If the work type is "any" and no
-    target locations are configured, the whole check is disabled and every
-    job passes, blank location included. Otherwise an empty location fails
-    the match — this filter narrows down to a specific set, unlike the
-    fail-open non-US location filter.
+    locations as a whole word (location_env_var: comma-separated, OR'd
+    together — e.g. "VA,Virginia,DC" to catch both abbreviated and
+    spelled-out state names across ATS backends that format locations
+    differently), or its location indicates the configured work type (or the
+    work type env var is "any", or its value isn't a recognised keyword, in
+    which case it's matched literally as a substring too). Target locations
+    are matched with word boundaries, not raw substring containment — e.g.
+    "VA" must not match inside "Sunnyvale, CA" — mirroring how
+    _NON_US_LOCATION_RE avoids "uk" matching inside "Milwaukee". If the work
+    type is "any" and no target locations are configured, the whole check is
+    disabled and every job passes, blank location included. Otherwise an
+    empty location fails the match — this filter narrows down to a specific
+    set, unlike the fail-open non-US location filter.
     """
     target_locations = [
         loc.strip().lower() for loc in os.environ.get(location_env_var, default_location).split(",") if loc.strip()
@@ -635,8 +638,10 @@ def _work_type_matches(
         return False
     location_lower = location.lower()
 
-    if any(target in location_lower for target in target_locations):
-        return True
+    if target_locations:
+        target_re = re.compile(r"\b(" + "|".join(re.escape(t) for t in target_locations) + r")\b")
+        if target_re.search(location_lower):
+            return True
     if work_type == "any":
         return True
     keywords = _WORK_TYPE_KEYWORDS.get(work_type, [work_type])

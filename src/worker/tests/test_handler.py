@@ -1177,6 +1177,19 @@ def test_location_matches_multiple_comma_separated_values(monkeypatch: pytest.Mo
     assert _location_matches("Seattle, Washington") is False
 
 
+def test_location_matches_va_does_not_match_inside_other_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LOCATION="VA" should match as a whole word only, not substrings like "Sunnyvale, CA".
+
+    Real regression: a CrowdStrike posting in Sunnyvale, CA slipped through
+    because "va" is a raw substring of "Sunnyvale".
+    """
+    monkeypatch.setenv("LOCATION", "VA,Virginia,DC")
+    assert _location_matches("USA - Sunnyvale, CA") is False
+    assert _location_matches("Savannah, GA") is False
+    assert _location_matches("Nevada") is False
+    assert _location_matches("US - VA, McLean") is True
+
+
 def test_location_matches_custom_work_type_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """_location_matches should honor a custom WORK_TYPE, independent of BUILTIN_WORK_TYPE."""
     monkeypatch.setenv("WORK_TYPE", "hybrid")
