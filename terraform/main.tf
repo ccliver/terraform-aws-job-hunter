@@ -395,33 +395,70 @@ resource "aws_scheduler_schedule" "notifier_weekend" {
 # Scheduler/SES) plus Logs Insights queries against the existing structured (Powertools JSON)
 # logs, so it costs nothing beyond the free tier: no custom PutMetricData/EMF metrics are
 # emitted. The account has 3 free dashboards/month; this is the first.
-resource "aws_cloudwatch_dashboard" "overview" {
-  dashboard_name = "${local.prefix}-overview"
+resource "aws_cloudwatch_dashboard" "observability" {
+  dashboard_name = "${local.prefix}-observability"
 
   dashboard_body = jsonencode({
+    # Dashboard default is 3h if unset, which is too narrow for a pipeline that only
+    # runs a handful of times a day — several widgets (esp. the Logs Insights ones)
+    # would show no data most of the time. Two weeks gives the daily Jobs Written
+    # widget a meaningful trend line. This is overridable per-viewing in the console.
+    start = "-P14D"
     widgets = [
       {
         type   = "metric"
         x      = 0
         y      = 0
-        width  = 24
+        width  = 8
         height = 6
         properties = {
-          title  = "Lambda: Invocations / Errors / Throttles"
+          title  = "Orchestrator: Invocations / Errors / Throttles"
           region = var.aws_region
           view   = "timeSeries"
           stat   = "Sum"
           period = 300
           metrics = [
-            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.orchestrator.function_name, { label = "Orchestrator Invocations" }],
-            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.orchestrator.function_name, { label = "Orchestrator Errors" }],
-            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.orchestrator.function_name, { label = "Orchestrator Throttles" }],
-            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.worker.function_name, { label = "Worker Invocations" }],
-            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.worker.function_name, { label = "Worker Errors" }],
-            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.worker.function_name, { label = "Worker Throttles" }],
-            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.notifier.function_name, { label = "Notifier Invocations" }],
-            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.notifier.function_name, { label = "Notifier Errors" }],
-            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.notifier.function_name, { label = "Notifier Throttles" }],
+            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.orchestrator.function_name, { label = "Invocations" }],
+            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.orchestrator.function_name, { label = "Errors" }],
+            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.orchestrator.function_name, { label = "Throttles" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 0
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Worker: Invocations / Errors / Throttles"
+          region = var.aws_region
+          view   = "timeSeries"
+          stat   = "Sum"
+          period = 300
+          metrics = [
+            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.worker.function_name, { label = "Invocations" }],
+            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.worker.function_name, { label = "Errors" }],
+            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.worker.function_name, { label = "Throttles" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 0
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Notifier: Invocations / Errors / Throttles"
+          region = var.aws_region
+          view   = "timeSeries"
+          stat   = "Sum"
+          period = 300
+          metrics = [
+            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.notifier.function_name, { label = "Invocations" }],
+            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.notifier.function_name, { label = "Errors" }],
+            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.notifier.function_name, { label = "Throttles" }],
           ]
         }
       },
@@ -549,13 +586,13 @@ resource "aws_cloudwatch_dashboard" "overview" {
         width  = 12
         height = 6
         properties = {
-          title  = "Jobs Written per Run (worker)"
+          title  = "Jobs Written per Day (worker)"
           region = var.aws_region
           view   = "timeSeries"
           query  = <<-EOQ
             SOURCE '${aws_cloudwatch_log_group.worker.name}'
             | filter message = "Worker done"
-            | stats sum(jobs_written) as jobs_written by bin(1h)
+            | stats sum(jobs_written) as total_jobs_written by bin(1d)
           EOQ
         }
       },
