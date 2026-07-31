@@ -176,3 +176,24 @@ tasks:
             print(f'Seeded: {item[\"company_name\"]} (ats={ats})')
         print(f'Done. {len(data)} companies seeded.')
         "
+
+  prune-companies:
+    desc: Delete companies from DynamoDB that are no longer in companies/companies.json (seed only upserts, never removes)
+    silent: true
+    cmds:
+      - |
+        uv run python -c "
+        import json, boto3
+        data = json.load(open('companies/companies.json'))
+        current = {item['company_name'] for item in data}
+        table = boto3.resource('dynamodb').Table('job-hunter-companies')
+        scan = table.scan(ProjectionExpression='company_name')
+        stale = [item['company_name'] for item in scan['Items'] if item['company_name'] not in current]
+        if not stale:
+            print('No stale companies found.')
+        else:
+            for name in stale:
+                table.delete_item(Key={'company_name': name})
+                print(f'Deleted: {name}')
+            print(f'Done. {len(stale)} stale companies removed.')
+        "
