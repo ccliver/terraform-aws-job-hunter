@@ -15,6 +15,12 @@ Beyond ATS-specific scraping, every job is passed through a relevance filter bef
   <img src="docs/architecture-light.png" alt="job-hunter architecture: EventBridge triggers the Orchestrator Lambda, which scans the DynamoDB companies table and fans out one SQS message per company (with a DLQ for failures). The Worker Lambda consumes each message, fetching jobs via Greenhouse/Lever/Workday/Built In APIs, filters them, and writes new postings to the DynamoDB jobs table. A second EventBridge schedule triggers the Notifier Lambda, which scans recent jobs and sends an HTML digest via SES.">
 </picture>
 
+## Observability
+
+<img src="docs/dashboard.png" alt="job-hunter CloudWatch dashboard: per-function Lambda invocations/errors/throttles for the Orchestrator, Worker, and Notifier, Lambda duration, SQS queue depth and DLQ backlog, DynamoDB consumed capacity, EventBridge Scheduler invocation attempts, SES send/bounce/complaint, a table of recent errors and warnings across all three functions, a daily jobs-written trend, and a table of ATS/backend fetch warnings.">
+
+A `job-hunter-observability` CloudWatch dashboard (`terraform/main.tf`) tracks the pipeline end-to-end using only standard AWS-published metrics for Lambda, SQS, DynamoDB, EventBridge Scheduler, and SES, plus three CloudWatch Logs Insights widgets against the existing structured (Powertools JSON) logs — recent errors/warnings, jobs written per day, and ATS/backend fetch warnings (e.g. a company whose `ats` value doesn't match a supported backend). No custom metrics are emitted, so it stays within CloudWatch's free tier.
+
 ## DynamoDB Tables
 
 ### `job-hunter-companies`
@@ -134,6 +140,7 @@ task apply    # builds all Lambda ZIPs, then terraform init + apply
 | `task invoke` | Full end-to-end test: orchestrator → workers → notifier |
 | `task logs-worker` | Print the worker Lambda's most recent CloudWatch log streams |
 | `task seed` | Seed the DynamoDB companies table from `companies/companies.json` |
+| `task prune-companies` | Delete companies from DynamoDB that are no longer in `companies/companies.json` |
 | `task flush-jobs` | Delete all items from the DynamoDB jobs table |
 | `task dynamo-disable-protection` | Disable deletion protection on the companies table (run before `destroy`) |
 
