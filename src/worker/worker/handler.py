@@ -622,9 +622,12 @@ def _work_type_matches(
     "VA" must not match inside "Sunnyvale, CA" — mirroring how
     _NON_US_LOCATION_RE avoids "uk" matching inside "Milwaukee". If the work
     type is "any" and no target locations are configured, the whole check is
-    disabled and every job passes, blank location included. Otherwise an
-    empty location fails the match — this filter narrows down to a specific
-    set, unlike the fail-open non-US location filter.
+    disabled and every job passes, blank location included. A blank location
+    otherwise passes only when the configured work type is "remote" — many
+    ATS listings leave location empty specifically for fully-remote roles,
+    so that's treated as a match rather than as missing data. For any other
+    configured work type (hybrid/office/a literal string), blank location
+    gives no evidence either way and fails the match.
     """
     target_locations = [
         loc.strip().lower() for loc in os.environ.get(location_env_var, default_location).split(",") if loc.strip()
@@ -635,7 +638,7 @@ def _work_type_matches(
         return True
 
     if not location:
-        return False
+        return work_type == "remote"
     location_lower = location.lower()
 
     if target_locations:

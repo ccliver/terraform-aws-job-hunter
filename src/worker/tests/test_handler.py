@@ -930,6 +930,17 @@ def test_filter_keeps_remote_jobs_by_default() -> None:
     assert len(result) == 1
 
 
+def test_filter_keeps_blank_location_jobs_by_default() -> None:
+    """_filter_relevant_jobs should keep a non-Built-In job with no location text at all by default.
+
+    Many ATS listings leave location blank specifically for fully-remote
+    roles, so under the default WORK_TYPE=remote this is treated as a match
+    rather than dropped as missing data.
+    """
+    result = _filter_relevant_jobs([_job("Platform Engineer", location="")], "Acme")
+    assert len(result) == 1
+
+
 def test_filter_exempts_builtin_jobs_from_work_type_check() -> None:
     """_filter_relevant_jobs should not apply LOCATION/WORK_TYPE to jobs carrying their own "company" key.
 
@@ -1094,10 +1105,23 @@ def test_builtin_location_matches_default_remote(location: str) -> None:
     assert _builtin_location_matches(location) is True
 
 
-@pytest.mark.parametrize("location", ["Reston, VA", "Arlington, VA", "Hybrid", "New York, NY", "", "In-Office"])
+@pytest.mark.parametrize("location", ["Reston, VA", "Arlington, VA", "Hybrid", "New York, NY", "In-Office"])
 def test_builtin_location_matches_default_excludes_non_remote_locations(location: str) -> None:
     """_builtin_location_matches should drop any non-remote location by default (location match is disabled)."""
     assert _builtin_location_matches(location) is False
+
+
+def test_builtin_location_matches_blank_location_passes_as_remote_by_default() -> None:
+    """A blank location should be treated as remote under the default BUILTIN_WORK_TYPE, not as missing data."""
+    assert _builtin_location_matches("") is True
+
+
+def test_builtin_location_matches_blank_location_fails_for_non_remote_work_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blank location gives no evidence of hybrid/office, so it should still fail those work types."""
+    monkeypatch.setenv("BUILTIN_WORK_TYPE", "hybrid")
+    assert _builtin_location_matches("") is False
 
 
 def test_builtin_location_matches_custom_location_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1149,10 +1173,21 @@ def test_location_matches_default_remote(location: str) -> None:
     assert _location_matches(location) is True
 
 
-@pytest.mark.parametrize("location", ["Reston, VA", "Arlington, VA", "Hybrid", "New York, NY", "", "In-Office"])
+@pytest.mark.parametrize("location", ["Reston, VA", "Arlington, VA", "Hybrid", "New York, NY", "In-Office"])
 def test_location_matches_default_excludes_non_remote_locations(location: str) -> None:
     """_location_matches should drop any non-remote location by default (location match is disabled)."""
     assert _location_matches(location) is False
+
+
+def test_location_matches_blank_location_passes_as_remote_by_default() -> None:
+    """A blank location should be treated as remote under the default WORK_TYPE, not as missing data."""
+    assert _location_matches("") is True
+
+
+def test_location_matches_blank_location_fails_for_non_remote_work_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A blank location gives no evidence of hybrid/office, so it should still fail those work types."""
+    monkeypatch.setenv("WORK_TYPE", "hybrid")
+    assert _location_matches("") is False
 
 
 def test_location_matches_custom_location_env(monkeypatch: pytest.MonkeyPatch) -> None:
