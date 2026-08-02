@@ -57,50 +57,6 @@ See [`examples/complete/`](examples/complete/) for a fully commented example set
 | location      | S    | Location string |
 | discovered_at | S    | ISO-8601 timestamp |
 
-## Project Layout
-
-```
-terraform-aws-job-hunter/
-├── main.tf                     # all resources (IAM, Lambda, SQS, DynamoDB, EventBridge) + self-build wiring
-├── variables.tf
-├── outputs.tf
-├── versions.tf                 # required_providers only — no backend, no provider block (see Usage)
-├── scripts/
-│   └── build-lambda-package.sh # builds each Lambda's zip automatically during plan/apply
-├── examples/
-│   └── complete/                # every variable, fully commented — see Usage
-│       ├── main.tf
-│       └── README.md
-├── pyproject.toml              # uv workspace root
-├── .python-version             # 3.13
-├── .pre-commit-config.yaml
-├── .tflint.hcl                 # tflint AWS ruleset config
-├── companies/
-│   └── companies.json          # example seed data — see DynamoDB Tables
-├── .github/
-│   └── workflows/ci.yml
-└── src/
-    ├── conftest.py             # sets fake AWS creds at module level for pytest
-    ├── orchestrator/
-    │   ├── pyproject.toml
-    │   ├── orchestrator/
-    │   │   └── handler.py
-    │   └── tests/
-    │       └── test_handler.py
-    ├── worker/
-    │   ├── pyproject.toml
-    │   ├── worker/
-    │   │   └── handler.py
-    │   └── tests/
-    │       └── test_handler.py
-    └── notifier/
-        ├── pyproject.toml
-        ├── notifier/
-        │   └── handler.py
-        └── tests/
-            └── test_handler.py
-```
-
 ## Local Development
 
 ```bash
