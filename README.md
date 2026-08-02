@@ -171,6 +171,7 @@ No modules.
 | <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | AWS region to deploy resources into | `string` | `"us-east-1"` | no |
 | <a name="input_builtin_location"></a> [builtin\_location](#input\_builtin\_location) | Location substring to additionally keep for the Built In (builtin.com) ATS backend; blank disables it (remote-only) | `string` | `""` | no |
 | <a name="input_builtin_work_type"></a> [builtin\_work\_type](#input\_builtin\_work\_type) | Work-type keyword to keep for the Built In ATS backend (remote, hybrid, office, any, or any literal substring) | `string` | `"remote"` | no |
+| <a name="input_enable_dashboard"></a> [enable\_dashboard](#input\_enable\_dashboard) | Whether to create the CloudWatch observability dashboard. It's built entirely from standard AWS-published metrics and Logs Insights queries (no custom metrics), so it costs nothing beyond the free tier when unused — this exists to avoid spending one of the 3 free dashboards/account on it for module users who don't want it | `bool` | `true` | no |
 | <a name="input_exclude_title_keywords"></a> [exclude\_title\_keywords](#input\_exclude\_title\_keywords) | Comma-separated title substrings (OR'd together, case-insensitive); a title matching any of these is dropped even if it also matched title\_keywords | `string` | `"manager,director"` | no |
 | <a name="input_lambda_memory_mb"></a> [lambda\_memory\_mb](#input\_lambda\_memory\_mb) | Lambda function memory in MB (orchestrator and notifier) | `number` | `512` | no |
 | <a name="input_lambda_timeout_seconds"></a> [lambda\_timeout\_seconds](#input\_lambda\_timeout\_seconds) | Lambda function timeout in seconds | `number` | `300` | no |
@@ -193,7 +194,7 @@ No modules.
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_companies_table_name"></a> [companies\_table\_name](#output\_companies\_table\_name) | DynamoDB companies table name |
-| <a name="output_dashboard_url"></a> [dashboard\_url](#output\_dashboard\_url) | Console URL for the CloudWatch observability dashboard |
+| <a name="output_dashboard_url"></a> [dashboard\_url](#output\_dashboard\_url) | Console URL for the CloudWatch observability dashboard, or null if enable\_dashboard is false |
 | <a name="output_jobs_table_name"></a> [jobs\_table\_name](#output\_jobs\_table\_name) | DynamoDB jobs table name |
 | <a name="output_notifier_lambda_arn"></a> [notifier\_lambda\_arn](#output\_notifier\_lambda\_arn) | ARN of the Notifier Lambda |
 | <a name="output_orchestrator_lambda_arn"></a> [orchestrator\_lambda\_arn](#output\_orchestrator\_lambda\_arn) | ARN of the Orchestrator Lambda |

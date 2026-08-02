@@ -10,6 +10,12 @@ variable "prefix" {
   default     = "job-hunter"
 }
 
+variable "enable_dashboard" {
+  description = "Whether to create the CloudWatch observability dashboard. It's built entirely from standard AWS-published metrics and Logs Insights queries (no custom metrics), so it costs nothing beyond the free tier when unused — this exists to avoid spending one of the 3 free dashboards/account on it for module users who don't want it"
+  type        = bool
+  default     = true
+}
+
 variable "ses_from_address" {
   description = "Verified SES sender email address"
   type        = string

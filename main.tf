@@ -410,8 +410,11 @@ resource "aws_scheduler_schedule" "notifier_weekend" {
 # Dashboard is built entirely from standard AWS-published metrics (Lambda/SQS/DynamoDB/
 # Scheduler/SES) plus Logs Insights queries against the existing structured (Powertools JSON)
 # logs, so it costs nothing beyond the free tier: no custom PutMetricData/EMF metrics are
-# emitted. The account has 3 free dashboards/month; this is the first.
+# emitted. The account has 3 free dashboards/month — enable_dashboard exists so module users
+# who don't want it don't spend one of those slots on it.
 resource "aws_cloudwatch_dashboard" "observability" {
+  count = var.enable_dashboard ? 1 : 0
+
   dashboard_name = "${local.prefix}-observability"
 
   dashboard_body = jsonencode({

@@ -39,6 +39,6 @@ output "notifier_lambda_arn" {
 }
 
 output "dashboard_url" {
-  description = "Console URL for the CloudWatch observability dashboard"
-  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.observability.dashboard_name}"
+  description = "Console URL for the CloudWatch observability dashboard, or null if enable_dashboard is false"
+  value       = var.enable_dashboard ? "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.observability[0].dashboard_name}" : null
 }

@@ -39,8 +39,9 @@ module "job_hunter" {
   source = "../.."
 
   # --- Core ---
-  aws_region = var.aws_region
-  prefix     = local.prefix # names every AWS resource; independent of the repo/module name
+  aws_region       = var.aws_region
+  prefix           = local.prefix # names every AWS resource; independent of the repo/module name
+  enable_dashboard = true         # built entirely from free AWS-published metrics/log queries; set false to skip using one of the 3 free dashboards/account
 
   # --- SES (required, no default — verify both addresses in SES first) ---
   ses_from_address = "you@yourdomain.com"
