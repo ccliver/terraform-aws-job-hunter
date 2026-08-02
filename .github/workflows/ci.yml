@@ -68,3 +68,22 @@ jobs:
 
       - name: Run pytest
         run: uv run pytest --tb=short -q
+
+  terraform-test:
+    name: Terraform Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # No AWS credentials needed: tests/main.tftest.hcl mocks the aws
+      # provider entirely. data.external.lambda_build still runs for real
+      # (it's a local script, not an AWS API call) so this exercises the
+      # actual Lambda-packaging path — ubuntu-latest ships pip3/zip/openssl.
+      - name: terraform init
+        run: terraform init
+
+      - name: terraform test
+        run: terraform test

@@ -1,20 +1,3 @@
-terraform {
-  required_version = ">= 1.9"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-
-  # No backend block: this example uses local state on purpose, since it's
-  # meant for reviewing/planning the module's full configuration surface, not
-  # for a real deployment (see README.md in this directory). A real deployment
-  # should have its own root config with a real backend, calling this module
-  # the same way.
-}
-
 locals {
   prefix = "job-hunter-example"
 }
