@@ -13,17 +13,17 @@ build/
 # ruff / ty caches
 .ruff_cache/
 
-# Terraform
+# Terraform (matches at repo root and inside examples/*/ alike)
 .tflint.d/
-terraform/.build/
-terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.backup
-terraform/*.tfvars
-terraform/.terraform.lock.hcl
+.build/
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
 
 # macOS
 .DS_Store
 
-# Local backend config (contains account-specific bucket names)
-backend.hcl
+# Real curated company list (companies.json in the repo is a generic example)
+companies/*.local.json

@@ -1,4 +1,4 @@
-# job-hunter
+# terraform-aws-job-hunter
 
 Automated job board monitor. An EventBridge cron fans out one Lambda per company to scrape careers pages, deduplicates results in DynamoDB, and emails a daily digest via SES.
 
@@ -19,7 +19,24 @@ Beyond ATS-specific scraping, every job is passed through a relevance filter bef
 
 <img src="docs/dashboard.png" alt="job-hunter CloudWatch dashboard: per-function Lambda invocations/errors/throttles for the Orchestrator, Worker, and Notifier, Lambda duration, SQS queue depth and DLQ backlog, DynamoDB consumed capacity, EventBridge Scheduler invocation attempts, SES send/bounce/complaint, a table of recent errors and warnings across all three functions, a daily jobs-written trend, and a table of ATS/backend fetch warnings.">
 
-A `job-hunter-observability` CloudWatch dashboard (`terraform/main.tf`) tracks the pipeline end-to-end using only standard AWS-published metrics for Lambda, SQS, DynamoDB, EventBridge Scheduler, and SES, plus three CloudWatch Logs Insights widgets against the existing structured (Powertools JSON) logs — recent errors/warnings, jobs written per day, and ATS/backend fetch warnings (e.g. a company whose `ats` value doesn't match a supported backend). No custom metrics are emitted, so it stays within CloudWatch's free tier.
+A `<prefix>-observability` CloudWatch dashboard (`main.tf`) tracks the pipeline end-to-end using only standard AWS-published metrics for Lambda, SQS, DynamoDB, EventBridge Scheduler, and SES, plus three CloudWatch Logs Insights widgets against the existing structured (Powertools JSON) logs — recent errors/warnings, jobs written per day, and ATS/backend fetch warnings (e.g. a company whose `ats` value doesn't match a supported backend). No custom metrics are emitted, so it stays within CloudWatch's free tier.
+
+## Usage
+
+This repo is a standalone Terraform module (repo root = module root) — Lambda source and infrastructure together, with no backend or provider configuration of its own, so it drops straight into a consuming root configuration:
+
+```hcl
+module "job_hunter" {
+  source = "github.com/ccliver/terraform-aws-job-hunter"
+
+  prefix           = "job-hunter"
+  ses_from_address = "you@yourdomain.com"
+  ses_to_address   = "you@yourdomain.com"
+  # ... see examples/complete/main.tf for every available variable
+}
+```
+
+See [`examples/complete/`](examples/complete/) for a fully commented example setting every variable, and the [Configuration](#configuration) table below for a quick reference. Whatever runs `terraform apply` against this module needs `bash`, `pip3`/`python3.13`, `zip`, and `openssl` on `PATH` — Lambda packages are built automatically as part of `plan`/`apply` (see `scripts/build-lambda-package.sh`), no separate build step required.
 
 ## DynamoDB Tables
 
@@ -43,43 +60,45 @@ A `job-hunter-observability` CloudWatch dashboard (`terraform/main.tf`) tracks t
 ## Project Layout
 
 ```
-job-hunter/
+terraform-aws-job-hunter/
+├── main.tf                     # all resources (IAM, Lambda, SQS, DynamoDB, EventBridge) + self-build wiring
+├── variables.tf
+├── outputs.tf
+├── versions.tf                 # required_providers only — no backend, no provider block (see Usage)
+├── scripts/
+│   └── build-lambda-package.sh # builds each Lambda's zip automatically during plan/apply
+├── examples/
+│   └── complete/                # every variable, fully commented — see Usage
+│       ├── main.tf
+│       └── README.md
 ├── pyproject.toml              # uv workspace root
 ├── .python-version             # 3.13
 ├── .pre-commit-config.yaml
 ├── .tflint.hcl                 # tflint AWS ruleset config
-├── Taskfile.yml                # operational tasks (see below)
 ├── companies/
-│   └── companies.json          # seed data for the companies table
+│   └── companies.json          # example seed data — see DynamoDB Tables
 ├── .github/
 │   └── workflows/ci.yml
-├── src/
-│   ├── conftest.py             # sets fake AWS creds at module level for pytest
-│   ├── orchestrator/
-│   │   ├── pyproject.toml
-│   │   ├── orchestrator/
-│   │   │   └── handler.py
-│   │   └── tests/
-│   │       └── test_handler.py
-│   ├── worker/
-│   │   ├── pyproject.toml
-│   │   ├── worker/
-│   │   │   └── handler.py
-│   │   └── tests/
-│   │       └── test_handler.py
-│   └── notifier/
-│       ├── pyproject.toml
-│       ├── notifier/
-│       │   └── handler.py
-│       └── tests/
-│           └── test_handler.py
-└── terraform/
-    ├── main.tf                 # all resources (IAM, Lambda, SQS, DynamoDB, EventBridge)
-    ├── versions.tf
-    ├── providers.tf
-    ├── backend.tf
-    ├── variables.tf
-    └── outputs.tf
+└── src/
+    ├── conftest.py             # sets fake AWS creds at module level for pytest
+    ├── orchestrator/
+    │   ├── pyproject.toml
+    │   ├── orchestrator/
+    │   │   └── handler.py
+    │   └── tests/
+    │       └── test_handler.py
+    ├── worker/
+    │   ├── pyproject.toml
+    │   ├── worker/
+    │   │   └── handler.py
+    │   └── tests/
+    │       └── test_handler.py
+    └── notifier/
+        ├── pyproject.toml
+        ├── notifier/
+        │   └── handler.py
+        └── tests/
+            └── test_handler.py
 ```
 
 ## Local Development
@@ -106,62 +125,9 @@ uv run pre-commit install
 uv run pre-commit install --hook-type pre-push  # for pytest
 ```
 
-## Infrastructure
-
-Deploys are managed via [Task](https://taskfile.dev). The Terraform backend is configured via a gitignored `terraform/backend.hcl` file.
-
-### First-time setup
-
-```bash
-# 1. Create terraform/backend.hcl with your S3 state bucket details
-cat > terraform/backend.hcl <<EOF
-bucket = "your-terraform-state-bucket"
-key    = "job-hunter/terraform.tfstate"
-region = "us-east-1"
-EOF
-
-# 2. Create terraform/terraform.tfvars with required variables
-cat > terraform/terraform.tfvars <<EOF
-ses_from_address = "you@yourdomain.com"
-ses_to_address   = "you@yourdomain.com"
-EOF
-
-# 3. Deploy
-task apply    # builds all Lambda ZIPs, then terraform init + apply
-```
-
-### Task reference
-
-| Task | Description |
-|------|-------------|
-| `task apply` | Build all artifacts and deploy infrastructure |
-| `task destroy` | Destroy all infrastructure |
-| `task build` | Build orchestrator, worker, and notifier Lambda ZIPs |
-| `task invoke` | Full end-to-end test: orchestrator → workers → notifier |
-| `task logs-worker` | Print the worker Lambda's most recent CloudWatch log streams |
-| `task seed` | Seed the DynamoDB companies table from `companies/companies.json` |
-| `task prune-companies` | Delete companies from DynamoDB that are no longer in `companies/companies.json` |
-| `task flush-jobs` | Delete all items from the DynamoDB jobs table |
-| `task dynamo-disable-protection` | Disable deletion protection on the companies table (run before `destroy`) |
-
-### Teardown
-
-DynamoDB deletion protection will cause `terraform destroy` to fail. Run this first:
-
-```bash
-task dynamo-disable-protection
-task destroy
-```
-
 ## Seeding Companies
 
-Edit `companies/companies.json` and run:
-
-```bash
-task seed
-```
-
-Each entry requires `company_name`, `careers_url`, and `ats` (`greenhouse`, `lever`, `workday`, or `builtin`):
+This module doesn't seed the companies table itself — that's a deployment-time concern for whatever root configuration instantiates it (using the `companies_table_name` output with the AWS CLI, a script, or your own tooling). `companies/companies.json` documents the expected shape, and doubles as a small usable starter list. Each entry requires `company_name`, `careers_url`, and `ats` (`greenhouse`, `lever`, `workday`, or `builtin`):
 
 ```json
 [
@@ -171,17 +137,112 @@ Each entry requires `company_name`, `careers_url`, and `ats` (`greenhouse`, `lev
 
 ## Configuration
 
-Set these in `terraform/terraform.tfvars` (see `terraform/variables.tf` for the full list, including Lambda sizing/timeouts and cron schedules). All have defaults, so none are required.
+Pass these as module arguments (see `variables.tf` for the full list, including Lambda sizing/timeouts and cron schedules — `examples/complete/main.tf` sets every one explicitly). All except `ses_from_address`/`ses_to_address` have defaults.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `prefix` | `"job-hunter"` | Prefix used to name every AWS resource, independent of the repo/module name |
 | `location` | `""` (disabled) | Location substring to additionally keep, for every backend except `builtin` |
 | `work_type` | `"remote"` | Work-type keyword to keep (`remote`, `hybrid`, `office`, `any`, or any literal substring), for every backend except `builtin` |
 | `builtin_location` | `""` (disabled) | Same as `location`, but for the `builtin` backend only — independent setting |
 | `builtin_work_type` | `"remote"` | Same as `work_type`, but for the `builtin` backend only — independent setting |
+| `title_keywords` | `"platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"` | Comma-separated title substrings a job title must match at least one of to be kept at all — this is what job category the app hunts for |
+| `exclude_title_keywords` | `"manager,director"` | Comma-separated title substrings that drop a title even if it matched `title_keywords` |
 
 `location`/`work_type` and `builtin_location`/`builtin_work_type` are deliberately separate: the curated company list often includes companies chosen for proximity to a specific place (e.g. a planned relocation), so a hybrid/on-site preference there shouldn't share Built In's broad-discovery "remote only" default. A job passes if it matches *either* the configured location *or* the work type (not both) — e.g. with `location = "Reston, VA"` and `work_type = "remote"`, both a Reston-based posting and a fully-remote posting anywhere would pass.
 
 ## CI
 
 Pull requests run two jobs: **pre-commit** (ruff, ty, terraform fmt/validate/docs/tflint/checkov) and **Tests** (pytest). All must pass before merge.
+
+<!-- BEGIN_TF_DOCS -->
+## Requirements
+
+| Name | Version |
+| ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.9 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 5.0 |
+| <a name="requirement_external"></a> [external](#requirement\_external) | ~> 2.3 |
+
+## Providers
+
+| Name | Version |
+| ---- | ------- |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 5.0 |
+| <a name="provider_external"></a> [external](#provider\_external) | ~> 2.3 |
+
+## Modules
+
+No modules.
+
+## Resources
+
+| Name | Type |
+| ---- | ---- |
+| [aws_cloudwatch_dashboard.observability](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_dashboard) | resource |
+| [aws_cloudwatch_log_group.notifier](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
+| [aws_cloudwatch_log_group.orchestrator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
+| [aws_cloudwatch_log_group.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
+| [aws_dynamodb_table.companies](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dynamodb_table) | resource |
+| [aws_dynamodb_table.jobs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/dynamodb_table) | resource |
+| [aws_iam_role.notifier](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.orchestrator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.scheduler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy.notifier](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.orchestrator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.scheduler](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_lambda_event_source_mapping.worker_sqs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_event_source_mapping) | resource |
+| [aws_lambda_function.notifier](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_lambda_function.orchestrator](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_lambda_function.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_scheduler_schedule.notifier_weekday](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/scheduler_schedule) | resource |
+| [aws_scheduler_schedule.notifier_weekend](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/scheduler_schedule) | resource |
+| [aws_scheduler_schedule.orchestrator_weekday](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/scheduler_schedule) | resource |
+| [aws_scheduler_schedule.orchestrator_weekend](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/scheduler_schedule) | resource |
+| [aws_sqs_queue.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue) | resource |
+| [aws_sqs_queue.worker_dlq](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue) | resource |
+| [aws_sqs_queue_policy.worker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sqs_queue_policy) | resource |
+| [aws_iam_policy_document.lambda_assume_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.scheduler_assume_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [external_external.lambda_build](https://registry.terraform.io/providers/hashicorp/external/latest/docs/data-sources/external) | data source |
+
+## Inputs
+
+| Name | Description | Type | Default | Required |
+| ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_aws_region"></a> [aws\_region](#input\_aws\_region) | AWS region to deploy resources into | `string` | `"us-east-1"` | no |
+| <a name="input_builtin_location"></a> [builtin\_location](#input\_builtin\_location) | Location substring to additionally keep for the Built In (builtin.com) ATS backend; blank disables it (remote-only) | `string` | `""` | no |
+| <a name="input_builtin_work_type"></a> [builtin\_work\_type](#input\_builtin\_work\_type) | Work-type keyword to keep for the Built In ATS backend (remote, hybrid, office, any, or any literal substring) | `string` | `"remote"` | no |
+| <a name="input_exclude_title_keywords"></a> [exclude\_title\_keywords](#input\_exclude\_title\_keywords) | Comma-separated title substrings (OR'd together, case-insensitive); a title matching any of these is dropped even if it also matched title\_keywords | `string` | `"manager,director"` | no |
+| <a name="input_lambda_memory_mb"></a> [lambda\_memory\_mb](#input\_lambda\_memory\_mb) | Lambda function memory in MB (orchestrator and notifier) | `number` | `512` | no |
+| <a name="input_lambda_timeout_seconds"></a> [lambda\_timeout\_seconds](#input\_lambda\_timeout\_seconds) | Lambda function timeout in seconds | `number` | `300` | no |
+| <a name="input_location"></a> [location](#input\_location) | Comma-separated location substrings (OR'd together) to additionally keep for every ATS backend except builtin; blank disables it (remote-only). Independent of builtin\_location | `string` | `""` | no |
+| <a name="input_lookback_minutes"></a> [lookback\_minutes](#input\_lookback\_minutes) | Minutes the Notifier looks back when querying for new jobs | `number` | `60` | no |
+| <a name="input_notifier_weekday_schedule"></a> [notifier\_weekday\_schedule](#input\_notifier\_weekday\_schedule) | EventBridge cron expression for the Notifier Lambda on weekdays (30 min after orchestrator) | `string` | `"cron(30 8-18/2 ? * MON-FRI *)"` | no |
+| <a name="input_notifier_weekend_schedule"></a> [notifier\_weekend\_schedule](#input\_notifier\_weekend\_schedule) | EventBridge cron expression for the Notifier Lambda on weekends (30 min after orchestrator) | `string` | `"cron(30 8 ? * SAT-SUN *)"` | no |
+| <a name="input_orchestrator_weekday_schedule"></a> [orchestrator\_weekday\_schedule](#input\_orchestrator\_weekday\_schedule) | EventBridge cron expression for the Orchestrator Lambda on weekdays | `string` | `"cron(0 8-18/2 ? * MON-FRI *)"` | no |
+| <a name="input_orchestrator_weekend_schedule"></a> [orchestrator\_weekend\_schedule](#input\_orchestrator\_weekend\_schedule) | EventBridge cron expression for the Orchestrator Lambda on weekends | `string` | `"cron(0 8 ? * SAT-SUN *)"` | no |
+| <a name="input_prefix"></a> [prefix](#input\_prefix) | Prefix used to name every AWS resource (Lambda functions, DynamoDB tables, SQS queues, etc.), independent of the repo/module name | `string` | `"job-hunter"` | no |
+| <a name="input_schedule_timezone"></a> [schedule\_timezone](#input\_schedule\_timezone) | IANA timezone the schedule cron expressions are evaluated in (EventBridge Scheduler handles DST automatically) | `string` | `"America/New_York"` | no |
+| <a name="input_ses_from_address"></a> [ses\_from\_address](#input\_ses\_from\_address) | Verified SES sender email address | `string` | n/a | yes |
+| <a name="input_ses_to_address"></a> [ses\_to\_address](#input\_ses\_to\_address) | Recipient email address for job digests | `string` | n/a | yes |
+| <a name="input_title_keywords"></a> [title\_keywords](#input\_title\_keywords) | Comma-separated title substrings (OR'd together, case-insensitive) a job title must match at least one of to be kept at all; also drives one paginated Workday search per entry | `string` | `"platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"` | no |
+| <a name="input_work_type"></a> [work\_type](#input\_work\_type) | Work-type keyword to keep for every ATS backend except builtin (remote, hybrid, office, any, or any literal substring). Independent of builtin\_work\_type | `string` | `"remote"` | no |
+| <a name="input_worker_memory_mb"></a> [worker\_memory\_mb](#input\_worker\_memory\_mb) | Worker Lambda memory in MB | `number` | `512` | no |
+
+## Outputs
+
+| Name | Description |
+| ---- | ----------- |
+| <a name="output_companies_table_name"></a> [companies\_table\_name](#output\_companies\_table\_name) | DynamoDB companies table name |
+| <a name="output_dashboard_url"></a> [dashboard\_url](#output\_dashboard\_url) | Console URL for the CloudWatch observability dashboard |
+| <a name="output_jobs_table_name"></a> [jobs\_table\_name](#output\_jobs\_table\_name) | DynamoDB jobs table name |
+| <a name="output_notifier_lambda_arn"></a> [notifier\_lambda\_arn](#output\_notifier\_lambda\_arn) | ARN of the Notifier Lambda |
+| <a name="output_orchestrator_lambda_arn"></a> [orchestrator\_lambda\_arn](#output\_orchestrator\_lambda\_arn) | ARN of the Orchestrator Lambda |
+| <a name="output_worker_dlq_url"></a> [worker\_dlq\_url](#output\_worker\_dlq\_url) | SQS dead-letter queue URL for failed Worker messages |
+| <a name="output_worker_function_name"></a> [worker\_function\_name](#output\_worker\_function\_name) | Function name of the Worker Lambda |
+| <a name="output_worker_lambda_arn"></a> [worker\_lambda\_arn](#output\_worker\_lambda\_arn) | ARN of the Worker Lambda |
+| <a name="output_worker_queue_url"></a> [worker\_queue\_url](#output\_worker\_queue\_url) | SQS queue URL for the Worker Lambda |
+<!-- END_TF_DOCS -->

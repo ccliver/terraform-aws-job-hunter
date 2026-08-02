@@ -4,6 +4,12 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "prefix" {
+  description = "Prefix used to name every AWS resource (Lambda functions, DynamoDB tables, SQS queues, etc.), independent of the repo/module name"
+  type        = string
+  default     = "job-hunter"
+}
+
 variable "ses_from_address" {
   description = "Verified SES sender email address"
   type        = string
@@ -65,13 +71,25 @@ variable "builtin_work_type" {
 variable "location" {
   description = "Comma-separated location substrings (OR'd together) to additionally keep for every ATS backend except builtin; blank disables it (remote-only). Independent of builtin_location"
   type        = string
-  default     = "VA,Virginia,DC"
+  default     = ""
 }
 
 variable "work_type" {
   description = "Work-type keyword to keep for every ATS backend except builtin (remote, hybrid, office, any, or any literal substring). Independent of builtin_work_type"
   type        = string
   default     = "remote"
+}
+
+variable "title_keywords" {
+  description = "Comma-separated title substrings (OR'd together, case-insensitive) a job title must match at least one of to be kept at all; also drives one paginated Workday search per entry"
+  type        = string
+  default     = "platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"
+}
+
+variable "exclude_title_keywords" {
+  description = "Comma-separated title substrings (OR'd together, case-insensitive); a title matching any of these is dropped even if it also matched title_keywords"
+  type        = string
+  default     = "manager,director"
 }
 
 variable "lambda_timeout_seconds" {

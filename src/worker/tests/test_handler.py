@@ -11,7 +11,6 @@ import requests
 from moto import mock_aws
 
 from worker.handler import (
-    _TITLE_KEYWORDS,
     _builtin_location_matches,
     _fetch_builtin_jobs,
     _fetch_greenhouse_jobs,
@@ -22,6 +21,7 @@ from worker.handler import (
     _location_matches,
     _make_job_id,
     _requires_excluded_clearance,
+    _title_keywords,
     handler,
 )
 
@@ -314,7 +314,7 @@ def _mock_workday_search(mock_post, keyword_pages: dict) -> None:
 
     keyword_pages maps a searchText keyword to a list of page dicts (as
     produced by _workday_page); any keyword not in the map — i.e. every
-    _TITLE_KEYWORDS entry not under test — gets an empty (0-total) page on
+    TITLE_KEYWORDS entry not under test — gets an empty (0-total) page on
     its first call, matching a real "no results for this search" response.
     """
     cursors = {kw: list(pages) for kw, pages in keyword_pages.items()}
@@ -349,8 +349,8 @@ def test_fetch_workday_jobs_single_page(mock_post, mock_get) -> None:
             "location": "Remote",
         }
     ]
-    # One search call per _TITLE_KEYWORDS entry.
-    assert mock_post.call_count == len(_TITLE_KEYWORDS)
+    # One search call per TITLE_KEYWORDS entry.
+    assert mock_post.call_count == len(_title_keywords())
     platform_call = next(c for c in mock_post.call_args_list if c.kwargs["json"]["searchText"] == "platform")
     assert platform_call.args[0] == "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/acme-careers/jobs"
     assert platform_call.kwargs["json"] == {"limit": 20, "offset": 0, "searchText": "platform"}
@@ -835,6 +835,36 @@ def test_filter_drops_irrelevant_titles(title: str) -> None:
     """_filter_relevant_jobs should drop titles that don't match any keyword."""
     result = _filter_relevant_jobs([_job(title)], "Acme")
     assert len(result) == 0
+
+
+def test_title_keywords_respects_custom_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_title_keywords should honor a custom TITLE_KEYWORDS env var."""
+    monkeypatch.setenv("TITLE_KEYWORDS", "kubernetes")
+    assert _title_keywords() == ["kubernetes"]
+
+
+def test_title_keywords_strips_and_lowercases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_title_keywords should strip whitespace and lowercase each entry."""
+    monkeypatch.setenv("TITLE_KEYWORDS", " Platform , SRE ")
+    assert _title_keywords() == ["platform", "sre"]
+
+
+def test_filter_respects_custom_title_keywords_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_filter_relevant_jobs should honor a custom TITLE_KEYWORDS for every backend."""
+    monkeypatch.setenv("TITLE_KEYWORDS", "registered nurse,rn")
+    result = _filter_relevant_jobs([_job("Registered Nurse - ICU")], "Acme")
+    assert len(result) == 1
+    result = _filter_relevant_jobs([_job("Platform Engineer")], "Acme")
+    assert result == []
+
+
+def test_filter_respects_custom_exclude_title_keywords_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_filter_relevant_jobs should honor a custom EXCLUDE_TITLE_KEYWORDS for every backend."""
+    monkeypatch.setenv("EXCLUDE_TITLE_KEYWORDS", "staff")
+    result = _filter_relevant_jobs([_job("Staff Engineer")], "Acme")
+    assert result == []
+    result = _filter_relevant_jobs([_job("Platform Engineer")], "Acme")
+    assert len(result) == 1
 
 
 @pytest.mark.parametrize(

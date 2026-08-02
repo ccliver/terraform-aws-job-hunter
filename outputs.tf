@@ -28,6 +28,11 @@ output "worker_lambda_arn" {
   value       = aws_lambda_function.worker.arn
 }
 
+output "worker_function_name" {
+  description = "Function name of the Worker Lambda"
+  value       = aws_lambda_function.worker.function_name
+}
+
 output "notifier_lambda_arn" {
   description = "ARN of the Notifier Lambda"
   value       = aws_lambda_function.notifier.arn

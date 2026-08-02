@@ -31,6 +31,17 @@ Environment variables expected:
                          — independent setting (defaults to "" — disabled)
     BUILTIN_WORK_TYPE - Same as WORK_TYPE, but for the builtin ATS backend only
                          — independent setting (defaults to "remote")
+    TITLE_KEYWORDS         - Comma-separated title substrings (OR'd together,
+                              case-insensitive); a job title must match at
+                              least one to be kept at all, for every ATS
+                              backend; also drives one paginated Workday
+                              search per entry (defaults to "platform,sre,
+                              site reliability,devops,cloud engineer,
+                              infrastructure,staff engineer")
+    EXCLUDE_TITLE_KEYWORDS - Comma-separated title substrings (OR'd together,
+                              case-insensitive); a title matching any of these
+                              is dropped even if it also matched
+                              TITLE_KEYWORDS (defaults to "manager,director")
 """
 
 from __future__ import annotations
@@ -78,23 +89,41 @@ _WORK_TYPE_KEYWORDS = {
     "office": ["in-office", "in office", "on-site", "onsite"],
 }
 
-# Keywords used for post-extraction title matching (case-insensitive).
-_TITLE_KEYWORDS = [
-    "platform",
-    "sre",
-    "site reliability",
-    "devops",
-    "cloud engineer",
-    "infrastructure",
-    "staff engineer",
-]
+# Defaults for the TITLE_KEYWORDS / EXCLUDE_TITLE_KEYWORDS env vars (see
+# _title_keywords / _exclude_title_keywords below).
+_DEFAULT_TITLE_KEYWORDS = "platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"
+_DEFAULT_EXCLUDE_TITLE_KEYWORDS = "manager,director"
 
-# Titles matching any of these (case-insensitive) are dropped even if they
-# also match _TITLE_KEYWORDS — management/leadership roles, not IC roles.
-_EXCLUDE_TITLE_KEYWORDS = [
-    "manager",
-    "director",
-]
+
+def _title_keywords() -> list[str]:
+    """Configured TITLE_KEYWORDS, lowercased and stripped.
+
+    A job title must match at least one of these (case-insensitive
+    substring) to be kept at all — see _title_looks_relevant /
+    _filter_relevant_jobs. Also drives one paginated Workday search per
+    entry in _fetch_workday_jobs. Read fresh from the env on every call
+    (not cached at import time), same pattern as _work_type_matches, so
+    tests can monkeypatch.setenv per-test.
+    """
+    return [
+        kw.strip().lower() for kw in os.environ.get("TITLE_KEYWORDS", _DEFAULT_TITLE_KEYWORDS).split(",") if kw.strip()
+    ]
+
+
+def _exclude_title_keywords() -> list[str]:
+    """Configured EXCLUDE_TITLE_KEYWORDS, lowercased and stripped.
+
+    A title matching any of these (case-insensitive substring) is dropped
+    even if it also matched TITLE_KEYWORDS — management/leadership roles,
+    not IC roles. Read fresh on every call, same reasoning as
+    _title_keywords.
+    """
+    return [
+        kw.strip().lower()
+        for kw in os.environ.get("EXCLUDE_TITLE_KEYWORDS", _DEFAULT_EXCLUDE_TITLE_KEYWORDS).split(",")
+        if kw.strip()
+    ]
+
 
 # Clearance tiers above Public Trust — the highest tier the user will pursue.
 # A "public trust" mention (with none of these) is explicitly allowed.
@@ -332,9 +361,9 @@ def _title_looks_relevant(title: str) -> bool:
     postings that would be dropped by _filter_relevant_jobs anyway.
     """
     title_lower = title.lower()
-    if not any(kw in title_lower for kw in _TITLE_KEYWORDS):
+    if not any(kw in title_lower for kw in _title_keywords()):
         return False
-    return not any(kw in title_lower for kw in _EXCLUDE_TITLE_KEYWORDS)
+    return not any(kw in title_lower for kw in _exclude_title_keywords())
 
 
 def _make_job_id(company: str, title: str, url: str) -> str:
@@ -346,8 +375,8 @@ def _make_job_id(company: str, title: str, url: str) -> str:
 def _filter_relevant_jobs(jobs: list[dict[str, str]], company: str) -> list[dict[str, str]]:
     """Drop jobs whose title doesn't match a target-role keyword, or matches an excluded one.
 
-    Performs case-insensitive substring matching against _TITLE_KEYWORDS,
-    then drops any of those matches whose title also hits _EXCLUDE_TITLE_KEYWORDS
+    Performs case-insensitive substring matching against TITLE_KEYWORDS,
+    then drops any of those matches whose title also hits EXCLUDE_TITLE_KEYWORDS
     (management/leadership roles), indicates a clearance requirement above
     Public Trust, has a location indicating a non-US posting, or (for every
     backend except "builtin") doesn't match the configured LOCATION/WORK_TYPE.
@@ -369,8 +398,8 @@ def _filter_relevant_jobs(jobs: list[dict[str, str]], company: str) -> list[dict
         or excluded-clearance keyword, whose location isn't non-US, and
         (unless from the builtin backend) matches the configured work type.
     """
-    matched = [j for j in jobs if any(kw in j.get("title", "").lower() for kw in _TITLE_KEYWORDS)]
-    filtered = [j for j in matched if not any(kw in j["title"].lower() for kw in _EXCLUDE_TITLE_KEYWORDS)]
+    matched = [j for j in jobs if any(kw in j.get("title", "").lower() for kw in _title_keywords())]
+    filtered = [j for j in matched if not any(kw in j["title"].lower() for kw in _exclude_title_keywords())]
     cleared = [j for j in filtered if not _requires_excluded_clearance(j["title"])]
     us_only = [j for j in cleared if not _is_non_us_location(j.get("location", ""))]
     work_type_matched = [j for j in us_only if "company" in j or _location_matches(j.get("location", ""))]
@@ -498,7 +527,7 @@ def _fetch_workday_jobs(careers_url: str) -> list[dict[str, str]]:
     """Fetch job listings from a Workday-hosted careers site via its unofficial JSON API.
 
     Parses the tenant/site from a myworkdayjobs.com careers URL, then issues
-    one paginated search per _TITLE_KEYWORDS entry (via the `searchText`
+    one paginated search per TITLE_KEYWORDS entry (via the `searchText`
     param) instead of paginating the company's entire board unfiltered.
     Company board sizes vary enormously — a few hundred postings for a
     startup vs. 17,000+ for a national retail chain with a posting per store
@@ -535,7 +564,7 @@ def _fetch_workday_jobs(careers_url: str) -> list[dict[str, str]]:
     clearance_skipped = 0
     seen_paths: set[str] = set()
 
-    for keyword in _TITLE_KEYWORDS:
+    for keyword in _title_keywords():
         offset = 0
         while offset < _WORKDAY_MAX_JOBS_PER_KEYWORD:
             try:

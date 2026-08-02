@@ -1,0 +1,89 @@
+terraform {
+  required_version = ">= 1.9"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+
+  # No backend block: this example uses local state on purpose, since it's
+  # meant for reviewing/planning the module's full configuration surface, not
+  # for a real deployment (see README.md in this directory). A real deployment
+  # should have its own root config with a real backend, calling this module
+  # the same way.
+}
+
+locals {
+  prefix = "job-hunter-example"
+}
+
+provider "aws" {
+  region = var.aws_region
+
+  default_tags {
+    tags = {
+      Project   = local.prefix
+      ManagedBy = "terraform"
+    }
+  }
+}
+
+variable "aws_region" {
+  type    = string
+  default = "us-east-1"
+}
+
+module "job_hunter" {
+  source = "../.."
+
+  # --- Core ---
+  aws_region = var.aws_region
+  prefix     = local.prefix # names every AWS resource; independent of the repo/module name
+
+  # --- SES (required, no default — verify both addresses in SES first) ---
+  ses_from_address = "you@yourdomain.com"
+  ses_to_address   = "you@yourdomain.com"
+
+  # --- Schedules (EventBridge Scheduler cron expressions + timezone) ---
+  orchestrator_weekday_schedule = "cron(0 8-18/2 ? * MON-FRI *)"  # every 2 hrs, 8am-6pm, weekdays
+  orchestrator_weekend_schedule = "cron(0 8 ? * SAT-SUN *)"       # once at 8am, weekends
+  notifier_weekday_schedule     = "cron(30 8-18/2 ? * MON-FRI *)" # 30 min after orchestrator
+  notifier_weekend_schedule     = "cron(30 8 ? * SAT-SUN *)"
+  schedule_timezone             = "America/New_York" # EventBridge Scheduler handles DST automatically
+  lookback_minutes              = 60                 # how far back the Notifier looks for new jobs
+
+  # --- Location / work-type filtering ---
+  # location/work_type apply to every ATS backend except builtin; builtin_location/
+  # builtin_work_type are independent, since Built In is a broad discovery search
+  # where "remote only" is a sensible default even when the curated company list
+  # (location/work_type) targets a specific place instead.
+  location          = ""       # comma-separated substrings, e.g. "Reston, VA,Arlington, VA"; blank disables it (remote-only)
+  work_type         = "remote" # "remote" | "hybrid" | "office" | "any" | any literal substring
+  builtin_location  = ""       # same shape as location, independent setting, for the builtin backend only
+  builtin_work_type = "remote"
+
+  # --- What job category this instance hunts for ---
+  # This is the one setting you'd change to repurpose the app entirely (e.g.
+  # for nursing instead of tech roles) — everything else here is generic.
+  title_keywords         = "platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"
+  exclude_title_keywords = "manager,director" # dropped even if they also match title_keywords
+
+  # --- Lambda sizing ---
+  lambda_timeout_seconds = 300
+  lambda_memory_mb       = 512 # orchestrator + notifier
+  worker_memory_mb       = 512
+}
+
+output "dashboard_url" {
+  value = module.job_hunter.dashboard_url
+}
+
+output "companies_table_name" {
+  value = module.job_hunter.companies_table_name
+}
+
+output "jobs_table_name" {
+  value = module.job_hunter.jobs_table_name
+}

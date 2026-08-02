@@ -1,5 +1,19 @@
 locals {
-  prefix = "job-hunter"
+  prefix       = var.prefix
+  lambda_names = ["orchestrator", "worker", "notifier"]
+}
+
+# Builds each Lambda's dependency-bundled zip automatically as part of
+# `terraform plan`/`apply` (see scripts/build-lambda-package.sh) — no separate
+# build step required, so `terraform init && terraform apply` alone is enough
+# for a consumer of this module. A null_resource + depends_on + filebase64sha256()
+# would hit a chicken-and-egg failure on a fresh checkout (filebase64sha256 is
+# evaluated during plan regardless of depends_on, before the zip exists); a
+# data source has no such ordering problem since the script that builds the zip
+# is the same thing that reports its hash, re-run fresh on every plan/apply.
+data "external" "lambda_build" {
+  for_each = toset(local.lambda_names)
+  program  = ["${path.module}/scripts/build-lambda-package.sh", each.key]
 }
 
 data "aws_iam_policy_document" "lambda_assume_role" {
@@ -134,7 +148,7 @@ resource "aws_lambda_function" "orchestrator" {
   handler          = "orchestrator.handler.handler"
   runtime          = "python3.13"
   filename         = "${path.module}/.build/orchestrator.zip"
-  source_code_hash = filebase64sha256("${path.module}/.build/orchestrator.zip")
+  source_code_hash = data.external.lambda_build["orchestrator"].result.hash
   timeout          = var.lambda_timeout_seconds
   memory_size      = var.lambda_memory_mb
 
@@ -157,18 +171,20 @@ resource "aws_lambda_function" "worker" {
   handler          = "worker.handler.handler"
   runtime          = "python3.13"
   filename         = "${path.module}/.build/worker.zip"
-  source_code_hash = filebase64sha256("${path.module}/.build/worker.zip")
+  source_code_hash = data.external.lambda_build["worker"].result.hash
   timeout          = var.lambda_timeout_seconds
   memory_size      = var.worker_memory_mb
 
   environment {
     variables = {
-      JOBS_TABLE        = aws_dynamodb_table.jobs.name
-      COMPANIES_TABLE   = aws_dynamodb_table.companies.name
-      BUILTIN_LOCATION  = var.builtin_location
-      BUILTIN_WORK_TYPE = var.builtin_work_type
-      LOCATION          = var.location
-      WORK_TYPE         = var.work_type
+      JOBS_TABLE             = aws_dynamodb_table.jobs.name
+      COMPANIES_TABLE        = aws_dynamodb_table.companies.name
+      BUILTIN_LOCATION       = var.builtin_location
+      BUILTIN_WORK_TYPE      = var.builtin_work_type
+      LOCATION               = var.location
+      WORK_TYPE              = var.work_type
+      TITLE_KEYWORDS         = var.title_keywords
+      EXCLUDE_TITLE_KEYWORDS = var.exclude_title_keywords
     }
   }
 }
@@ -190,7 +206,7 @@ resource "aws_lambda_function" "notifier" {
   handler          = "notifier.handler.handler"
   runtime          = "python3.13"
   filename         = "${path.module}/.build/notifier.zip"
-  source_code_hash = filebase64sha256("${path.module}/.build/notifier.zip")
+  source_code_hash = data.external.lambda_build["notifier"].result.hash
   timeout          = var.lambda_timeout_seconds
   memory_size      = var.lambda_memory_mb
 
