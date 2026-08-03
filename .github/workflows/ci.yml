@@ -78,10 +78,11 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      # No AWS credentials needed: tests/main.tftest.hcl mocks the aws
-      # provider entirely. data.external.lambda_build still runs for real
-      # (it's a local script, not an AWS API call) so this exercises the
-      # actual Lambda-packaging path — ubuntu-latest ships pip3/zip/openssl.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: terraform init
         run: terraform init
 
