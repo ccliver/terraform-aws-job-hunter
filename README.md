@@ -96,20 +96,7 @@ This module doesn't seed the companies table itself — that's a deployment-time
 
 ## Configuration
 
-Pass these as module arguments (see `variables.tf` for the full list, including Lambda sizing/timeouts and cron schedules — `examples/complete/main.tf` sets every one explicitly). All except `ses_from_address`/`ses_to_address` have defaults.
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `prefix` | `"job-hunter"` | Prefix used to name every AWS resource, independent of the repo/module name |
-| `location` | `""` (disabled) | Location substring to additionally keep, for every backend except `builtin` |
-| `work_type` | `"remote"` | Work-type keyword to keep (`remote`, `hybrid`, `office`, `any`, or any literal substring), for every backend except `builtin` |
-| `builtin_location` | `""` (disabled) | Same as `location`, but for the `builtin` backend only — independent setting |
-| `builtin_work_type` | `"remote"` | Same as `work_type`, but for the `builtin` backend only — independent setting |
-| `title_keywords` | `"platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"` | Comma-separated title substrings a job title must match at least one of to be kept at all — this is what job category the app hunts for |
-| `exclude_title_keywords` | `"manager,director"` | Comma-separated title substrings that drop a title even if it matched `title_keywords` |
-| `allow_public_trust` | `true` | Whether to keep postings requiring a Public Trust clearance |
-| `allow_secret_clearance` | `false` | Whether to keep postings requiring a Secret-tier clearance (no polygraph/friends-family interviews) |
-| `allow_top_secret_clearance` | `false` | Whether to keep postings requiring a Top-Secret-tier or above clearance |
+Pass these as module arguments (see the [Inputs](#inputs) section below for the full list — `examples/complete/main.tf` sets every one explicitly). All except `ses_from_address`/`ses_to_address` have defaults.
 
 `location`/`work_type` and `builtin_location`/`builtin_work_type` are deliberately separate: the curated company list often includes companies chosen for proximity to a specific place (e.g. a planned relocation), so a hybrid/on-site preference there shouldn't share Built In's broad-discovery "remote only" default. A job passes if it matches *either* the configured location *or* the work type (not both) — e.g. with `location = "Reston, VA"` and `work_type = "remote"`, both a Reston-based posting and a fully-remote posting anywhere would pass.
 
