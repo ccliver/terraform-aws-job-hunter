@@ -15,6 +15,9 @@ ATS backends:
                  its own "company" key instead of relying on the SQS
                  message's company_name. Jobs from companies already tracked
                  directly elsewhere in companies.json are skipped.
+    oracle     - Oracle Fusion Cloud Recruiting's public REST API
+                 (recruitingCEJobRequisitions) — the same endpoint the
+                 career site's own search page calls, unauthenticated.
 
 All environment variables below are required — this app has no config
 defaults of its own (12-factor: config lives in the environment, supplied
@@ -91,6 +94,10 @@ _WORKDAY_MAX_JOBS_PER_KEYWORD = 1000
 
 _BUILTIN_BASE_URL = "https://builtin.com"
 _BUILTIN_MAX_PAGES = 15
+
+_ORACLE_URL_RE = re.compile(r"^https://([^/]+)/hcmUI/CandidateExperience/([^/]+)/sites/([^/?#]+)")
+_ORACLE_PAGE_SIZE = 20
+_ORACLE_MAX_JOBS_PER_KEYWORD = 1000
 
 _WORK_TYPE_KEYWORDS = {
     "remote": ["remote", "distributed", "anywhere"],
@@ -925,13 +932,108 @@ def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, Any]]:
     return jobs
 
 
+def _fetch_oracle_jobs(careers_url: str) -> list[dict[str, Any]]:
+    """Fetch job listings from an Oracle Fusion Cloud Recruiting careers site.
+
+    Parses the host/locale/site from a hcmUI/CandidateExperience careers URL,
+    then issues one paginated search per TITLE_KEYWORDS entry against
+    Oracle's public recruitingCEJobRequisitions REST API — the same endpoint
+    the career site's own search page calls, no auth or bot protection.
+    Like Workday, the keyword search is fuzzy, not an exact substring match,
+    so every result is still re-checked with _title_looks_relevant before
+    being kept, and seen_ids dedupes postings surfaced under more than one
+    keyword. Unlike Workday/Built In, the search response already includes
+    each posting's full description (ShortDescriptionStr), so no extra
+    per-posting detail request is needed — same as Greenhouse.
+
+    Args:
+        careers_url: Careers URL of the form
+            https://{host}/hcmUI/CandidateExperience/{locale}/sites/{site}.
+
+    Returns:
+        Normalised list of job dicts with title, url, location keys (plus
+        clearance_review=True for jobs with an ambiguous clearance mention).
+    """
+    match = _ORACLE_URL_RE.match(careers_url)
+    if not match:
+        logger.warning("Not a parseable Oracle CandidateExperience URL", url=careers_url)
+        return []
+    host, locale, site = match.groups()
+    api_url = f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+
+    jobs = []
+    clearance_skipped = 0
+    seen_ids: set[str] = set()
+
+    for keyword in _title_keywords():
+        offset = 0
+        while offset < _ORACLE_MAX_JOBS_PER_KEYWORD:
+            try:
+                resp = requests.get(
+                    api_url,
+                    params={
+                        "onlyData": "true",
+                        "expand": "requisitionList",
+                        "finder": (
+                            f"findReqs;siteNumber={site},facetsList=LOCATIONS,"
+                            f"limit={_ORACLE_PAGE_SIZE},offset={offset},keyword={keyword}"
+                        ),
+                    },
+                    timeout=30,
+                )
+                resp.raise_for_status()
+            except requests.RequestException as exc:
+                logger.warning("Oracle fetch failed", url=api_url, keyword=keyword, error=str(exc))
+                break
+
+            try:
+                data = resp.json()
+                item = data["items"][0]
+            except (requests.exceptions.JSONDecodeError, KeyError, IndexError):
+                logger.warning("Oracle response is not in the expected shape", url=api_url, keyword=keyword)
+                break
+
+            postings = item.get("requisitionList", [])
+            if not postings:
+                break
+
+            for posting in postings:
+                job_id = posting.get("Id", "")
+                if job_id in seen_ids:
+                    continue
+                title = posting.get("Title", "")
+                if not _title_looks_relevant(title):
+                    continue
+                seen_ids.add(job_id)
+                description = posting.get("ShortDescriptionStr") or ""
+                excluded, needs_review = _clearance_decision(f"{title} {description}")
+                if excluded:
+                    clearance_skipped += 1
+                    continue
+                job = {
+                    "title": title,
+                    "url": f"https://{host}/hcmUI/CandidateExperience/{locale}/sites/{site}/job/{job_id}",
+                    "location": posting.get("PrimaryLocation", ""),
+                }
+                if needs_review:
+                    job["clearance_review"] = True
+                jobs.append(job)
+
+            offset += _ORACLE_PAGE_SIZE
+            if offset >= item.get("TotalJobsCount", 0):
+                break
+
+    logger.info("Oracle jobs fetched", url=careers_url, count=len(jobs), clearance_skipped=clearance_skipped)
+    return jobs
+
+
 def _fetch_jobs(company_name: str, careers_url: str, ats: str) -> list[dict[str, Any]]:
     """Dispatch to the appropriate ATS handler and return normalised job dicts.
 
     Args:
         company_name: Unused; kept for a uniform call signature across backends.
         careers_url: URL passed to the ATS handler.
-        ats: ATS backend identifier ("greenhouse", "lever", "workday", or "builtin").
+        ats: ATS backend identifier ("greenhouse", "lever", "workday", "builtin", or "oracle").
 
     Returns:
         Normalised list of job dicts with title, url, location keys (plus a
@@ -946,6 +1048,8 @@ def _fetch_jobs(company_name: str, careers_url: str, ats: str) -> list[dict[str,
         return _fetch_workday_jobs(careers_url)
     if ats == "builtin":
         return _fetch_builtin_jobs(careers_url)
+    if ats == "oracle":
+        return _fetch_oracle_jobs(careers_url)
     logger.warning("Unrecognised ATS backend", company=company_name, ats=ats)
     return []
 

@@ -17,6 +17,7 @@ from worker.handler import (
     _fetch_greenhouse_jobs,
     _fetch_jobs,
     _fetch_lever_jobs,
+    _fetch_oracle_jobs,
     _fetch_workday_jobs,
     _filter_relevant_jobs,
     _is_non_us_location,
@@ -255,6 +256,14 @@ def test_fetch_jobs_dispatches_builtin(mock_bi) -> None:
     mock_bi.return_value = []
     _fetch_jobs("Built In - AWS Search", "https://builtin.com/jobs?search=AWS", "builtin")
     mock_bi.assert_called_once_with("https://builtin.com/jobs?search=AWS")
+
+
+@patch("worker.handler._fetch_oracle_jobs")
+def test_fetch_jobs_dispatches_oracle(mock_or) -> None:
+    """_fetch_jobs should call _fetch_oracle_jobs for ats='oracle'."""
+    mock_or.return_value = []
+    _fetch_jobs("Acme", "https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1", "oracle")
+    mock_or.assert_called_once_with("https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1")
 
 
 # --- _fetch_greenhouse_jobs unit tests ---
@@ -932,6 +941,197 @@ def test_fetch_builtin_jobs_skips_description_fetch_when_every_clearance_tier_al
 
     assert len(jobs) == 1
     assert mock_get.call_count == 2
+
+
+# --- _fetch_oracle_jobs unit tests ---
+
+
+_ORACLE_CAREERS_URL = "https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1"
+
+
+def _oracle_item(postings: list[dict], total: int) -> dict:
+    return {"items": [{"TotalJobsCount": total, "requisitionList": postings}]}
+
+
+def _oracle_posting(
+    title: str, job_id: str, location: str = "Fairfax, VA, United States", description: str = ""
+) -> dict:
+    return {
+        "Id": job_id,
+        "Title": title,
+        "PrimaryLocation": location,
+        "ShortDescriptionStr": description,
+    }
+
+
+def _mock_oracle_search(mock_get, keyword_pages: dict) -> None:
+    """Wire mock_get.side_effect to return keyword-specific paginated pages.
+
+    keyword_pages maps a finder "keyword" value to a list of page dicts (as
+    produced by _oracle_item); any keyword not in the map — i.e. every
+    TITLE_KEYWORDS entry not under test — gets an empty (0-total) page on
+    its first call, matching a real "no results for this search" response.
+    """
+    cursors = {kw: list(pages) for kw, pages in keyword_pages.items()}
+
+    def fake_get(*args, **kwargs):
+        finder = kwargs["params"]["finder"]
+        keyword = finder.split("keyword=", 1)[1]
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        pages = cursors.get(keyword)
+        mock_resp.json.return_value = pages.pop(0) if pages else _oracle_item([], total=0)
+        return mock_resp
+
+    mock_get.side_effect = fake_get
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_single_page(mock_get) -> None:
+    """_fetch_oracle_jobs should normalise postings from a single page of results."""
+    _mock_oracle_search(mock_get, {"platform": [_oracle_item([_oracle_posting("Platform Engineer", "1001")], total=1)]})
+
+    jobs = _fetch_oracle_jobs(_ORACLE_CAREERS_URL)
+
+    assert jobs == [
+        {
+            "title": "Platform Engineer",
+            "url": "https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/1001",
+            "location": "Fairfax, VA, United States",
+        }
+    ]
+    # One search call per TITLE_KEYWORDS entry.
+    assert mock_get.call_count == len(_title_keywords())
+    platform_call = next(c for c in mock_get.call_args_list if "keyword=platform" in c.kwargs["params"]["finder"])
+    assert (
+        platform_call.args[0]
+        == "https://acme.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    )
+    assert platform_call.kwargs["params"]["onlyData"] == "true"
+    assert "siteNumber=CX_1" in platform_call.kwargs["params"]["finder"]
+    assert "offset=0" in platform_call.kwargs["params"]["finder"]
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_paginates_across_pages(mock_get) -> None:
+    """_fetch_oracle_jobs should keep requesting pages for a keyword until all its postings are collected."""
+    page1 = _oracle_item([_oracle_posting(f"Platform Engineer {i}", f"100{i}") for i in range(20)], total=25)
+    page2 = _oracle_item([_oracle_posting(f"Platform Engineer {i}", f"100{i}") for i in range(20, 25)], total=25)
+    _mock_oracle_search(mock_get, {"platform": [page1, page2]})
+
+    jobs = _fetch_oracle_jobs(_ORACLE_CAREERS_URL)
+
+    assert len(jobs) == 25
+    platform_calls = [c for c in mock_get.call_args_list if "keyword=platform" in c.kwargs["params"]["finder"]]
+    assert len(platform_calls) == 2
+    assert "offset=0" in platform_calls[0].kwargs["params"]["finder"]
+    assert "offset=20" in platform_calls[1].kwargs["params"]["finder"]
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_dedupes_posting_seen_under_multiple_keywords(mock_get) -> None:
+    """A posting matching more than one keyword search should only be processed once."""
+    posting = _oracle_posting("Senior DevOps Platform Engineer", "1001")
+    _mock_oracle_search(
+        mock_get,
+        {
+            "platform": [_oracle_item([posting], total=1)],
+            "devops": [_oracle_item([posting], total=1)],
+        },
+    )
+
+    jobs = _fetch_oracle_jobs(_ORACLE_CAREERS_URL)
+
+    assert len(jobs) == 1
+
+
+def test_fetch_oracle_jobs_non_oracle_url_returns_empty() -> None:
+    """_fetch_oracle_jobs should return [] for a URL that isn't a parseable CandidateExperience URL."""
+    assert _fetch_oracle_jobs("https://acme.com/careers") == []
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_request_failure_returns_empty(mock_get) -> None:
+    """_fetch_oracle_jobs should return [] when the HTTP request raises."""
+    mock_get.side_effect = requests.RequestException("boom")
+
+    assert _fetch_oracle_jobs(_ORACLE_CAREERS_URL) == []
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_skips_irrelevant_titles(mock_get) -> None:
+    """_fetch_oracle_jobs should drop postings whose title doesn't look relevant, despite matching the search."""
+    _mock_oracle_search(mock_get, {"platform": [_oracle_item([_oracle_posting("Store Associate", "1001")], total=1)]})
+
+    jobs = _fetch_oracle_jobs(_ORACLE_CAREERS_URL)
+
+    assert jobs == []
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_excludes_high_clearance_description(mock_get) -> None:
+    """_fetch_oracle_jobs should drop a posting whose description requires a high clearance,
+    even when the title itself gives no indication."""
+    _mock_oracle_search(
+        mock_get,
+        {
+            "platform": [
+                _oracle_item(
+                    [
+                        _oracle_posting(
+                            "Platform Engineer", "1001", description="Must hold an active Top Secret clearance."
+                        )
+                    ],
+                    total=1,
+                )
+            ]
+        },
+    )
+
+    jobs = _fetch_oracle_jobs(_ORACLE_CAREERS_URL)
+
+    assert jobs == []
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_allows_public_trust_description(mock_get) -> None:
+    """_fetch_oracle_jobs should keep a posting whose description only requires Public Trust."""
+    _mock_oracle_search(
+        mock_get,
+        {
+            "platform": [
+                _oracle_item(
+                    [_oracle_posting("Platform Engineer", "1001", description="Requires a Public Trust clearance.")],
+                    total=1,
+                )
+            ]
+        },
+    )
+
+    jobs = _fetch_oracle_jobs(_ORACLE_CAREERS_URL)
+
+    assert len(jobs) == 1
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_oracle_jobs_flags_ambiguous_clearance_for_review(mock_get) -> None:
+    """_fetch_oracle_jobs should keep, but flag, a posting with an unspecified clearance mention."""
+    _mock_oracle_search(
+        mock_get,
+        {
+            "platform": [
+                _oracle_item(
+                    [_oracle_posting("Platform Engineer", "1001", description="Security clearance required.")],
+                    total=1,
+                )
+            ]
+        },
+    )
+
+    jobs = _fetch_oracle_jobs(_ORACLE_CAREERS_URL)
+
+    assert len(jobs) == 1
+    assert jobs[0]["clearance_review"] is True
 
 
 # --- _filter_relevant_jobs unit tests ---

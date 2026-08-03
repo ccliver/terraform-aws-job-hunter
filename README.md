@@ -2,11 +2,14 @@
 
 Automated job board monitor. An EventBridge cron fans out one Lambda per company to scrape careers pages, deduplicates results in DynamoDB, and emails a daily digest via SES.
 
-The worker supports four scraping backends:
+The worker supports five scraping backends:
 - **Greenhouse / Lever / Workday** — direct JSON API calls
+- **Oracle** — Oracle Fusion Cloud Recruiting's public `recruitingCEJobRequisitions` REST API — the same unauthenticated endpoint the career site's own search page calls
 - **Built In** — scrapes a Built In (builtin.com) search results page (server-rendered HTML); since it aggregates postings across many employers, each job carries its own company name and postings from companies already tracked directly elsewhere in `companies.json` are skipped
 
-Beyond ATS-specific scraping, every job is passed through a relevance filter before being written to DynamoDB: it must match a target-role keyword (platform/SRE/DevOps/cloud/infrastructure/staff engineer), must not look like a management role, must not require a security clearance above Public Trust, must not be a non-US posting, and must match a configurable location/work-type preference (defaults to remote-only — see [Configuration](#configuration)). See `worker/handler.py:_filter_relevant_jobs`.
+Beyond ATS-specific scraping, every job is passed through a relevance filter before being written to DynamoDB: it must match a target-role keyword (platform/SRE/DevOps/cloud/infrastructure/staff engineer), must not look like a management role, must not be a non-US posting, and must match a configurable location/work-type preference (defaults to remote-only — see [Configuration](#configuration)). See `worker/handler.py:_filter_relevant_jobs`.
+
+Clearance filtering is tiered, not a blanket cutoff: Public Trust, Secret, and Top Secret are each independently allow/deny-able (`allow_public_trust`/`allow_secret_clearance`/`allow_top_secret_clearance`), and a posting with an unspecified/ambiguous clearance mention is never dropped outright — it's kept and flagged for manual review in the notifier digest instead. See `worker/handler.py:_clearance_decision`.
 
 ## Architecture
 
@@ -45,7 +48,7 @@ See [`examples/complete/`](examples/complete/) for a fully commented example set
 |-------------|------|---------------|
 | company_name | S    | Partition key |
 | careers_url  | S    | Careers page URL |
-| ats          | S    | ATS backend (`greenhouse`, `lever`, `workday`, or `builtin`) |
+| ats          | S    | ATS backend (`greenhouse`, `lever`, `workday`, `oracle`, or `builtin`) |
 
 ### `job-hunter-jobs`
 | Attribute     | Type | Role          |
@@ -83,7 +86,7 @@ uv run pre-commit install --hook-type pre-push  # for pytest
 
 ## Seeding Companies
 
-This module doesn't seed the companies table itself — that's a deployment-time concern for whatever root configuration instantiates it (using the `companies_table_name` output with the AWS CLI, a script, or your own tooling). `companies/companies.json` documents the expected shape, and doubles as a small usable starter list. Each entry requires `company_name`, `careers_url`, and `ats` (`greenhouse`, `lever`, `workday`, or `builtin`):
+This module doesn't seed the companies table itself — that's a deployment-time concern for whatever root configuration instantiates it (using the `companies_table_name` output with the AWS CLI, a script, or your own tooling). `companies/companies.json` documents the expected shape, and doubles as a small usable starter list. Each entry requires `company_name`, `careers_url`, and `ats` (`greenhouse`, `lever`, `workday`, `oracle`, or `builtin`):
 
 ```json
 [
@@ -104,8 +107,13 @@ Pass these as module arguments (see `variables.tf` for the full list, including 
 | `builtin_work_type` | `"remote"` | Same as `work_type`, but for the `builtin` backend only — independent setting |
 | `title_keywords` | `"platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"` | Comma-separated title substrings a job title must match at least one of to be kept at all — this is what job category the app hunts for |
 | `exclude_title_keywords` | `"manager,director"` | Comma-separated title substrings that drop a title even if it matched `title_keywords` |
+| `allow_public_trust` | `true` | Whether to keep postings requiring a Public Trust clearance |
+| `allow_secret_clearance` | `false` | Whether to keep postings requiring a Secret-tier clearance (no polygraph/friends-family interviews) |
+| `allow_top_secret_clearance` | `false` | Whether to keep postings requiring a Top-Secret-tier or above clearance |
 
 `location`/`work_type` and `builtin_location`/`builtin_work_type` are deliberately separate: the curated company list often includes companies chosen for proximity to a specific place (e.g. a planned relocation), so a hybrid/on-site preference there shouldn't share Built In's broad-discovery "remote only" default. A job passes if it matches *either* the configured location *or* the work type (not both) — e.g. with `location = "Reston, VA"` and `work_type = "remote"`, both a Reston-based posting and a fully-remote posting anywhere would pass.
+
+The three `allow_*` clearance variables are each independent — an unspecified/ambiguous clearance mention (no level stated) is never dropped by any of them; it's kept and flagged for manual review in the notifier digest instead, unless every tier is already allowed. See `worker/handler.py:_clearance_decision`.
 
 ## CI
 
@@ -188,7 +196,7 @@ No modules.
 | <a name="input_schedule_timezone"></a> [schedule\_timezone](#input\_schedule\_timezone) | IANA timezone the schedule cron expressions are evaluated in (EventBridge Scheduler handles DST automatically) | `string` | `"America/New_York"` | no |
 | <a name="input_ses_from_address"></a> [ses\_from\_address](#input\_ses\_from\_address) | Verified SES sender email address | `string` | n/a | yes |
 | <a name="input_ses_to_address"></a> [ses\_to\_address](#input\_ses\_to\_address) | Recipient email address for job digests | `string` | n/a | yes |
-| <a name="input_title_keywords"></a> [title\_keywords](#input\_title\_keywords) | Comma-separated title substrings (OR'd together, case-insensitive) a job title must match at least one of to be kept at all; also drives one paginated Workday search per entry | `string` | `"platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"` | no |
+| <a name="input_title_keywords"></a> [title\_keywords](#input\_title\_keywords) | Comma-separated title substrings (OR'd together, case-insensitive) a job title must match at least one of to be kept at all; also drives one paginated Workday/Oracle search per entry | `string` | `"platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"` | no |
 | <a name="input_work_type"></a> [work\_type](#input\_work\_type) | Work-type keyword to keep for every ATS backend except builtin (remote, hybrid, office, any, or any literal substring). Independent of builtin\_work\_type | `string` | `"remote"` | no |
 | <a name="input_worker_memory_mb"></a> [worker\_memory\_mb](#input\_worker\_memory\_mb) | Worker Lambda memory in MB | `number` | `512` | no |
 

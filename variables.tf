@@ -87,7 +87,7 @@ variable "work_type" {
 }
 
 variable "title_keywords" {
-  description = "Comma-separated title substrings (OR'd together, case-insensitive) a job title must match at least one of to be kept at all; also drives one paginated Workday search per entry"
+  description = "Comma-separated title substrings (OR'd together, case-insensitive) a job title must match at least one of to be kept at all; also drives one paginated Workday/Oracle search per entry"
   type        = string
   default     = "platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"
 }
