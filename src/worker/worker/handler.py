@@ -22,26 +22,23 @@ Environment variables expected:
                        builtin ATS backend to skip already-tracked companies)
     LOCATION          - Comma-separated location substrings to additionally
                          keep (OR'd together) for every ATS backend except
-                         builtin (defaults to "" — disabled, i.e. remote-only)
+                         builtin; blank disables it (remote-only)
     WORK_TYPE         - Work-type keyword to keep for every ATS backend except
                          builtin: "remote", "hybrid", "office", "any", or any
-                         other literal substring to match (defaults to "remote")
+                         other literal substring to match
     BUILTIN_LOCATION  - Same as LOCATION (also comma-separated), but for the
-                         builtin ATS backend only
-                         — independent setting (defaults to "" — disabled)
-    BUILTIN_WORK_TYPE - Same as WORK_TYPE, but for the builtin ATS backend only
-                         — independent setting (defaults to "remote")
+                         builtin ATS backend only — independent setting
+    BUILTIN_WORK_TYPE - Same as WORK_TYPE, but for the builtin ATS backend
+                         only — independent setting
     TITLE_KEYWORDS         - Comma-separated title substrings (OR'd together,
                               case-insensitive); a job title must match at
                               least one to be kept at all, for every ATS
                               backend; also drives one paginated Workday
-                              search per entry (defaults to "platform,sre,
-                              site reliability,devops,cloud engineer,
-                              infrastructure,staff engineer")
+                              search per entry
     EXCLUDE_TITLE_KEYWORDS - Comma-separated title substrings (OR'd together,
                               case-insensitive); a title matching any of these
                               is dropped even if it also matched
-                              TITLE_KEYWORDS (defaults to "manager,director")
+                              TITLE_KEYWORDS
 """
 
 from __future__ import annotations
@@ -70,29 +67,11 @@ _WORKDAY_MAX_JOBS_PER_KEYWORD = 1000
 _BUILTIN_BASE_URL = "https://builtin.com"
 _BUILTIN_MAX_PAGES = 15
 
-# Defaults for the LOCATION/WORK_TYPE and BUILTIN_LOCATION/BUILTIN_WORK_TYPE
-# env var pairs (see _location_matches / _builtin_location_matches). Kept
-# deliberately independent: Built In is a broad discovery search where
-# remote-only is a sensible default, while the curated company list includes
-# companies chosen for their proximity to a specific future location (e.g.
-# NoVA defense contractors), so filtering both off the same setting would
-# suppress exactly the hybrid/on-site roles those companies were added for.
-# Both default location to blank (disabled) and work type to "remote".
-_DEFAULT_LOCATION = ""
-_DEFAULT_WORK_TYPE = "remote"
-_BUILTIN_DEFAULT_LOCATION = ""
-_BUILTIN_DEFAULT_WORK_TYPE = "remote"
-
 _WORK_TYPE_KEYWORDS = {
     "remote": ["remote", "distributed", "anywhere"],
     "hybrid": ["hybrid"],
     "office": ["in-office", "in office", "on-site", "onsite"],
 }
-
-# Defaults for the TITLE_KEYWORDS / EXCLUDE_TITLE_KEYWORDS env vars (see
-# _title_keywords / _exclude_title_keywords below).
-_DEFAULT_TITLE_KEYWORDS = "platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"
-_DEFAULT_EXCLUDE_TITLE_KEYWORDS = "manager,director"
 
 
 def _title_keywords() -> list[str]:
@@ -105,9 +84,7 @@ def _title_keywords() -> list[str]:
     (not cached at import time), same pattern as _work_type_matches, so
     tests can monkeypatch.setenv per-test.
     """
-    return [
-        kw.strip().lower() for kw in os.environ.get("TITLE_KEYWORDS", _DEFAULT_TITLE_KEYWORDS).split(",") if kw.strip()
-    ]
+    return [kw.strip().lower() for kw in os.environ["TITLE_KEYWORDS"].split(",") if kw.strip()]
 
 
 def _exclude_title_keywords() -> list[str]:
@@ -118,11 +95,7 @@ def _exclude_title_keywords() -> list[str]:
     not IC roles. Read fresh on every call, same reasoning as
     _title_keywords.
     """
-    return [
-        kw.strip().lower()
-        for kw in os.environ.get("EXCLUDE_TITLE_KEYWORDS", _DEFAULT_EXCLUDE_TITLE_KEYWORDS).split(",")
-        if kw.strip()
-    ]
+    return [kw.strip().lower() for kw in os.environ["EXCLUDE_TITLE_KEYWORDS"].split(",") if kw.strip()]
 
 
 # Clearance tiers above Public Trust — the highest tier the user will pursue.
@@ -635,9 +608,7 @@ def _is_known_company(company: str, known_companies: set[str]) -> bool:
     return any(known in company_lower or company_lower in known for known in known_companies)
 
 
-def _work_type_matches(
-    location: str, location_env_var: str, work_type_env_var: str, default_location: str, default_work_type: str
-) -> bool:
+def _work_type_matches(location: str, location_env_var: str, work_type_env_var: str) -> bool:
     """Shared implementation behind _location_matches and _builtin_location_matches.
 
     A job is kept if its location contains any of the configured target
@@ -658,10 +629,8 @@ def _work_type_matches(
     configured work type (hybrid/office/a literal string), blank location
     gives no evidence either way and fails the match.
     """
-    target_locations = [
-        loc.strip().lower() for loc in os.environ.get(location_env_var, default_location).split(",") if loc.strip()
-    ]
-    work_type = os.environ.get(work_type_env_var, default_work_type).lower()
+    target_locations = [loc.strip().lower() for loc in os.environ[location_env_var].split(",") if loc.strip()]
+    work_type = os.environ[work_type_env_var].lower()
 
     if not target_locations and work_type == "any":
         return True
@@ -689,25 +658,20 @@ def _location_matches(location: str) -> bool:
     list includes companies chosen for proximity to a specific future
     location, so a hybrid/on-site preference there shouldn't be governed by
     the same "remote only" default that makes sense for Built In's broad
-    discovery search. Defaults to remote-only. See _work_type_matches for
-    the shared matching rules.
+    discovery search. See _work_type_matches for the shared matching rules.
     """
-    return _work_type_matches(location, "LOCATION", "WORK_TYPE", _DEFAULT_LOCATION, _DEFAULT_WORK_TYPE)
+    return _work_type_matches(location, "LOCATION", "WORK_TYPE")
 
 
 def _builtin_location_matches(location: str) -> bool:
     """Check a Built In job's location against the configured target location or work type.
 
-    Controlled by the BUILTIN_LOCATION (default "" — disabled) and
-    BUILTIN_WORK_TYPE (default "remote") env vars, independent of the
-    LOCATION / WORK_TYPE env vars used by every other backend (see
-    _location_matches). Defaults to pure remote-only filtering, matching the
-    user's own manual search practice on builtin.com (leave location blank,
-    filter to Remote). See _work_type_matches for the shared matching rules.
+    Controlled by the BUILTIN_LOCATION / BUILTIN_WORK_TYPE env vars,
+    independent of the LOCATION / WORK_TYPE env vars used by every other
+    backend (see _location_matches). See _work_type_matches for the shared
+    matching rules.
     """
-    return _work_type_matches(
-        location, "BUILTIN_LOCATION", "BUILTIN_WORK_TYPE", _BUILTIN_DEFAULT_LOCATION, _BUILTIN_DEFAULT_WORK_TYPE
-    )
+    return _work_type_matches(location, "BUILTIN_LOCATION", "BUILTIN_WORK_TYPE")
 
 
 def _builtin_card_text_by_icon(card: Tag, icon_class: str) -> str:
