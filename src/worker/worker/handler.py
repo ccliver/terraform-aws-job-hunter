@@ -16,10 +16,21 @@ ATS backends:
                  message's company_name. Jobs from companies already tracked
                  directly elsewhere in companies.json are skipped.
 
+All environment variables below are required — this app has no config
+defaults of its own (12-factor: config lives in the environment, supplied
+by Terraform; see variables.tf for the actual default values used at
+deploy time). Tests set them in src/worker/tests/conftest.py.
+
 Environment variables expected:
     JOBS_TABLE      - DynamoDB table name for job postings
     COMPANIES_TABLE - DynamoDB table name for tracked companies (used by the
                        builtin ATS backend to skip already-tracked companies)
+    ENABLE_CLEARANCE_FILTER - "true"/"false"; drop postings requiring a
+                       clearance above Public Trust (see
+                       _requires_excluded_clearance). When "false", the
+                       Workday/Built In fetchers also skip the extra
+                       per-posting detail-page request that exists only to
+                       feed this check.
     LOCATION          - Comma-separated location substrings to additionally
                          keep (OR'd together) for every ATS backend except
                          builtin; blank disables it (remote-only)
@@ -151,6 +162,18 @@ _CLEARANCE_FALSE_POSITIVE_PHRASES = [
 ]
 
 
+def _clearance_filter_enabled() -> bool:
+    """Whether ENABLE_CLEARANCE_FILTER is set to "true".
+
+    Checked both by _requires_excluded_clearance itself and, separately, by
+    the Workday/Built In fetchers before their extra per-posting detail-page
+    request — that request exists solely to feed _requires_excluded_clearance
+    text it can't get from the title/search-result alone, so there's no
+    reason to make it when the filter is off.
+    """
+    return os.environ["ENABLE_CLEARANCE_FILTER"].lower() == "true"
+
+
 def _requires_excluded_clearance(text: str) -> bool:
     """Check whether text indicates a clearance requirement above Public Trust.
 
@@ -159,8 +182,11 @@ def _requires_excluded_clearance(text: str) -> bool:
     allowed, as is an explicit "no clearance required" negation. A
     generic/unspecified clearance mention with no level given is treated as
     excluded by default. Known false-positive boilerplate (e.g. the EPPA
-    notice) is stripped before matching.
+    notice) is stripped before matching. Always False if ENABLE_CLEARANCE_FILTER
+    is not "true" — see _clearance_filter_enabled.
     """
+    if not _clearance_filter_enabled():
+        return False
     text_lower = text.lower()
     for phrase in _CLEARANCE_FALSE_POSITIVE_PHRASES:
         text_lower = text_lower.replace(phrase, "")
@@ -516,7 +542,8 @@ def _fetch_workday_jobs(careers_url: str) -> list[dict[str, str]]:
     dedupes across searches to avoid double-processing (and double-fetching
     descriptions for) the same posting. For postings whose title already
     looks relevant, a follow-up request fetches the full description to
-    catch clearance requirements that aren't mentioned in the title.
+    catch clearance requirements that aren't mentioned in the title — skipped
+    entirely when ENABLE_CLEARANCE_FILTER is off, since that's its only use.
 
     Args:
         careers_url: Careers URL of the form
@@ -570,7 +597,11 @@ def _fetch_workday_jobs(careers_url: str) -> list[dict[str, str]]:
                 if not _title_looks_relevant(title):
                     continue
                 seen_paths.add(external_path)
-                description = _fetch_workday_job_description(tenant, wd, site, external_path)
+                description = (
+                    _fetch_workday_job_description(tenant, wd, site, external_path)
+                    if _clearance_filter_enabled()
+                    else ""
+                )
                 if _requires_excluded_clearance(f"{title} {description}"):
                     clearance_skipped += 1
                     continue
@@ -718,8 +749,9 @@ def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, str]]:
     relevant (_title_looks_relevant), a follow-up request to the job's own
     detail page fetches the full description to catch clearance requirements
     that aren't mentioned in the title — same pattern as _fetch_workday_jobs,
-    and for the same reason (avoid an extra request per irrelevant posting).
-    Postings are also dropped by _builtin_location_matches (BUILTIN_LOCATION /
+    and for the same reason (avoid an extra request per irrelevant posting);
+    also skipped entirely when ENABLE_CLEARANCE_FILTER is off. Postings are
+    also dropped by _builtin_location_matches (BUILTIN_LOCATION /
     BUILTIN_WORK_TYPE env vars) before the description fetch, for the same
     cost-avoidance reason.
 
@@ -778,7 +810,7 @@ def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, str]]:
                 continue
             href = title_el.get("href", "")
             job_url = _BUILTIN_BASE_URL + (href if isinstance(href, str) else "")
-            description = _fetch_builtin_job_description(job_url)
+            description = _fetch_builtin_job_description(job_url) if _clearance_filter_enabled() else ""
             if _requires_excluded_clearance(f"{title} {description}"):
                 clearance_skipped += 1
                 continue

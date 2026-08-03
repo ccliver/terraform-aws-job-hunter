@@ -98,6 +98,12 @@ variable "exclude_title_keywords" {
   default     = "manager,director"
 }
 
+variable "enable_clearance_filter" {
+  description = "Whether to drop job postings that require a security clearance above Public Trust. When false, the Workday and Built In backends also skip the extra per-posting detail-page request that exists only to feed this check"
+  type        = bool
+  default     = true
+}
+
 variable "lambda_timeout_seconds" {
   description = "Lambda function timeout in seconds"
   type        = number

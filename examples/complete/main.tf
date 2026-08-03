@@ -54,6 +54,9 @@ module "job_hunter" {
   title_keywords         = "platform,sre,site reliability,devops,cloud engineer,infrastructure,staff engineer"
   exclude_title_keywords = "manager,director" # dropped even if they also match title_keywords
 
+  # --- Clearance filtering ---
+  enable_clearance_filter = true # drop postings requiring a clearance above Public Trust; also skips an extra per-posting detail-page fetch on Workday/Built In when false
+
   # --- Lambda sizing ---
   lambda_timeout_seconds = 300
   lambda_memory_mb       = 512 # orchestrator + notifier

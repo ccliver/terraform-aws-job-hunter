@@ -473,6 +473,22 @@ def test_fetch_workday_jobs_description_fetch_failure_falls_back_to_title(mock_p
     assert len(jobs) == 1
 
 
+@patch("worker.handler.requests.get")
+@patch("worker.handler.requests.post")
+def test_fetch_workday_jobs_skips_description_fetch_when_clearance_filter_disabled(
+    mock_post, mock_get, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_fetch_workday_jobs should not fetch a posting's description when ENABLE_CLEARANCE_FILTER is false."""
+    monkeypatch.setenv("ENABLE_CLEARANCE_FILTER", "false")
+    mock_post.return_value.json.return_value = _workday_page([_workday_posting("Platform Engineer", "R001")], total=1)
+    mock_post.return_value.raise_for_status.return_value = None
+
+    jobs = _fetch_workday_jobs("https://acme.wd1.myworkdayjobs.com/acme-careers")
+
+    assert len(jobs) == 1
+    mock_get.assert_not_called()
+
+
 # --- _fetch_builtin_jobs unit tests ---
 
 
@@ -790,6 +806,23 @@ def test_fetch_builtin_jobs_description_fetch_failure_falls_back_to_title(mock_g
     assert len(jobs) == 1
 
 
+@patch("worker.handler.requests.get")
+def test_fetch_builtin_jobs_skips_description_fetch_when_clearance_filter_disabled(
+    mock_get, aws_resources: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_fetch_builtin_jobs should not fetch a posting's detail page when ENABLE_CLEARANCE_FILTER is false."""
+    monkeypatch.setenv("ENABLE_CLEARANCE_FILTER", "false")
+    _mock_builtin_gets(
+        mock_get,
+        [_builtin_page_html([_builtin_card_html("Cloud Engineer", "/job/cloud-engineer/1", "Acme", "Remote")])],
+    )
+
+    jobs = _fetch_builtin_jobs("https://builtin.com/jobs?search=AWS")
+
+    assert len(jobs) == 1
+    assert mock_get.call_count == 2
+
+
 # --- _filter_relevant_jobs unit tests ---
 
 
@@ -1076,6 +1109,12 @@ def test_requires_excluded_clearance_ignores_eppa_boilerplate() -> None:
 def test_requires_excluded_clearance_still_catches_real_polygraph_mention() -> None:
     """A genuine clearance-related polygraph mention outside the EPPA notice should still exclude."""
     assert _requires_excluded_clearance("Must be willing to submit to a polygraph examination.") is True
+
+
+def test_requires_excluded_clearance_false_when_filter_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_requires_excluded_clearance should always return False when ENABLE_CLEARANCE_FILTER is not "true"."""
+    monkeypatch.setenv("ENABLE_CLEARANCE_FILTER", "false")
+    assert _requires_excluded_clearance("Must have an active Top Secret clearance.") is False
 
 
 # --- _is_non_us_location unit tests ---

@@ -102,3 +102,16 @@ run "worker_receives_configured_title_keywords" {
     error_message = "Worker Lambda should receive the configured EXCLUDE_TITLE_KEYWORDS env var"
   }
 }
+
+run "worker_receives_clearance_filter_toggle" {
+  command = plan
+
+  variables {
+    enable_clearance_filter = false
+  }
+
+  assert {
+    condition     = aws_lambda_function.worker.environment[0].variables["ENABLE_CLEARANCE_FILTER"] == "false"
+    error_message = "Worker Lambda should receive the configured ENABLE_CLEARANCE_FILTER env var"
+  }
+}
