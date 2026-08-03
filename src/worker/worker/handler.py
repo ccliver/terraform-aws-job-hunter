@@ -130,7 +130,7 @@ def _exclude_title_keywords() -> list[str]:
 _TOP_SECRET_KEYWORDS = [
     "top secret",
     "ts/sci",
-    "ts-sci",
+    "ts sci",
     "polygraph",
     "full scope poly",
     "ci poly",
@@ -212,13 +212,21 @@ def _clearance_tier(text: str) -> str:
     Returns "top_secret", "secret", "public_trust", "ambiguous" (a
     generic/unspecified mention with no level given), or "none" (no
     clearance mentioned, or an explicit "no clearance required" negation).
-    Known false-positive boilerplate (e.g. the EPPA notice, which mentions
-    "polygraph" but has nothing to do with government clearance) is stripped
-    before matching. Checked highest tier first so overlapping substrings
-    (e.g. "top secret clearance" also containing "secret clearance") resolve
-    to the higher tier.
+    Hyphens are normalised to spaces before matching — "Top-Secret" is the
+    grammatically standard hyphenation as a compound modifier ("a top-secret
+    clearance") and is common in postings, but keyword phrases below are
+    written space-separated; without this, a hyphenated "top-secret
+    clearance" fails every _TOP_SECRET_KEYWORDS entry and instead
+    substring-matches _SECRET_KEYWORDS's "secret clearance" (the text right
+    after the hyphen), misclassifying a Top Secret requirement as merely
+    Secret — the wrong direction to get wrong. Known false-positive
+    boilerplate (e.g. the EPPA notice, which mentions "polygraph" but has
+    nothing to do with government clearance) is stripped before matching.
+    Checked highest tier first so overlapping substrings (e.g. "top secret
+    clearance" also containing "secret clearance") resolve to the higher
+    tier.
     """
-    text_lower = text.lower()
+    text_lower = text.lower().replace("-", " ")
     for phrase in _CLEARANCE_FALSE_POSITIVE_PHRASES:
         text_lower = text_lower.replace(phrase, "")
     if any(kw in text_lower for kw in _TOP_SECRET_KEYWORDS):

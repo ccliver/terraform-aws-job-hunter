@@ -1146,15 +1146,32 @@ def test_filter_empty_input_returns_empty() -> None:
     "text",
     [
         "Must have an active Top Secret clearance.",
+        "Must have an active Top-Secret clearance.",
         "TS/SCI required for this role.",
+        "TS-SCI required for this role.",
         "Full scope polygraph required.",
+        "Full-scope polygraph required.",
         "This role requires a CI Poly.",
         "SCI clearance is required.",
         "Must be willing to submit to a polygraph examination.",
     ],
 )
 def test_clearance_decision_excludes_top_secret_by_default(text: str) -> None:
-    """_clearance_decision should exclude Top-Secret-tier text under the default ALLOW_* env vars."""
+    """_clearance_decision should exclude Top-Secret-tier text under the default ALLOW_* env vars,
+    including hyphenated phrasing (e.g. "Top-Secret", the grammatically standard compound-modifier form)."""
+    assert _clearance_decision(text) == (True, False)
+
+
+def test_clearance_decision_hyphenated_top_secret_excluded_even_when_secret_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for a real Accenture Federal Services posting: "Must have an active Top-Secret
+    clearance; SCI preferred with a willingness to sit for a poly" slipped through with
+    ALLOW_SECRET_CLEARANCE=true, because the hyphenated "Top-Secret" missed every _TOP_SECRET_KEYWORDS
+    entry (all space-separated) and instead substring-matched _SECRET_KEYWORDS's "secret clearance" —
+    the text immediately following the hyphen — misclassifying a Top Secret requirement as Secret."""
+    monkeypatch.setenv("ALLOW_SECRET_CLEARANCE", "true")
+    text = "Must have an active Top-Secret clearance; SCI preferred with a willingness to sit for a poly"
     assert _clearance_decision(text) == (True, False)
 
 
