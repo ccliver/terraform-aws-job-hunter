@@ -29,7 +29,7 @@ logger = Logger(service="notifier")
 dynamodb = boto3.resource("dynamodb")
 
 
-def _query_recent_jobs(table: Any, lookback_minutes: int) -> list[dict[str, str]]:
+def _query_recent_jobs(table: Any, lookback_minutes: int) -> list[dict[str, Any]]:
     """Scan jobs table for items discovered within the lookback window.
 
     TODO: add a GSI on discovered_at for efficient time-range queries
@@ -49,13 +49,18 @@ def _query_recent_jobs(table: Any, lookback_minutes: int) -> list[dict[str, str]
     return response.get("Items", [])
 
 
-def _build_email_body(jobs: list[dict[str, str]]) -> tuple[str, str]:
+def _build_email_body(jobs: list[dict[str, Any]]) -> tuple[str, str]:
     """Render plain-text and HTML email bodies from a list of job dicts, grouped by company.
+
+    A job with clearance_review=True (set by the worker for a posting whose
+    clearance requirement was ambiguous/unspecified — see worker/handler.py's
+    _clearance_decision) is still included, but marked with a review note
+    rather than silently guessed at.
 
     Returns:
         Tuple of (text_body, html_body).
     """
-    by_company: dict[str, list[dict[str, str]]] = defaultdict(list)
+    by_company: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for job in jobs:
         by_company[job["company"]].append(job)
 
@@ -71,15 +76,26 @@ def _build_email_body(jobs: list[dict[str, str]]) -> tuple[str, str]:
         html_rows = []
         for job in company_jobs:
             location = job.get("location", "").strip()
-            text_lines.append(f"  - {job['title']}" + (f" ({location})" if location else "") + f"\n    {job['url']}")
+            needs_review = bool(job.get("clearance_review"))
+            review_suffix = " [CLEARANCE UNCLEAR - PLEASE VERIFY]" if needs_review else ""
+            text_lines.append(
+                f"  - {job['title']}" + (f" ({location})" if location else "") + review_suffix + f"\n    {job['url']}"
+            )
             location_html = (
                 f'<p style="margin:4px 0 0;font-size:13px;color:#8a8a9e;">{escape(location)}</p>' if location else ""
+            )
+            review_badge = (
+                '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:4px;'
+                'background-color:#fff3cd;color:#856404;font-size:11px;font-weight:600;">'
+                "CLEARANCE UNCLEAR</span>"
+                if needs_review
+                else ""
             )
             html_rows.append(
                 f'<div style="padding:12px 0;border-bottom:1px solid #eeeef2;">'
                 f'<a href="{escape(job["url"])}" '
                 f'style="font-size:15px;font-weight:600;color:#3454d1;text-decoration:none;">'
-                f"{escape(job['title'])}</a>{location_html}</div>"
+                f"{escape(job['title'])}</a>{review_badge}{location_html}</div>"
             )
 
         text_sections.append(f"{company} ({len(company_jobs)})\n" + "\n".join(text_lines))

@@ -12,15 +12,16 @@ from moto import mock_aws
 
 from worker.handler import (
     _builtin_location_matches,
+    _clearance_decision,
     _fetch_builtin_jobs,
     _fetch_greenhouse_jobs,
     _fetch_jobs,
+    _fetch_lever_jobs,
     _fetch_workday_jobs,
     _filter_relevant_jobs,
     _is_non_us_location,
     _location_matches,
     _make_job_id,
-    _requires_excluded_clearance,
     _title_keywords,
     handler,
 )
@@ -98,6 +99,25 @@ def test_handler_writes_new_jobs(mock_fetch, aws_resources: dict, lambda_context
     assert items[0]["company"] == "Acme Corp"
     assert items[0]["location"] == "Remote"
     assert "discovered_at" in items[0]
+    assert "clearance_review" not in items[0]
+
+
+@patch("worker.handler._fetch_jobs")
+def test_handler_writes_clearance_review_flag(mock_fetch, aws_resources: dict, lambda_context) -> None:
+    """handler() should persist clearance_review=True for a job flagged by the fetcher for manual review."""
+    mock_fetch.return_value = [
+        {
+            "title": "Cloud Engineer",
+            "url": "https://acme.com/jobs/1",
+            "location": "Remote",
+            "clearance_review": True,
+        },
+    ]
+
+    handler(_sqs_event("Acme Corp", "https://acme.com/jobs"), lambda_context)
+
+    items = aws_resources["table"].scan()["Items"]
+    assert items[0]["clearance_review"] is True
 
 
 @patch("worker.handler._fetch_jobs")
@@ -289,6 +309,65 @@ def test_fetch_greenhouse_jobs_allows_public_trust_description(mock_get) -> None
     assert [j["title"] for j in jobs] == ["Cloud Engineer"]
 
 
+@patch("worker.handler.requests.get")
+def test_fetch_greenhouse_jobs_flags_ambiguous_clearance_for_review(mock_get) -> None:
+    """_fetch_greenhouse_jobs should keep, but flag, a posting with an unspecified clearance mention."""
+    mock_get.return_value.json.return_value = {
+        "jobs": [_greenhouse_posting("Cloud Engineer", content="Security clearance required.")]
+    }
+    mock_get.return_value.raise_for_status.return_value = None
+
+    jobs = _fetch_greenhouse_jobs("https://boards-api.greenhouse.io/v1/boards/acme/jobs")
+
+    assert len(jobs) == 1
+    assert jobs[0]["clearance_review"] is True
+
+
+# --- _fetch_lever_jobs unit tests ---
+
+
+def _lever_posting(title: str) -> dict:
+    return {
+        "text": title,
+        "hostedUrl": f"https://jobs.lever.co/acme/{title}",
+        "categories": {"location": "Remote"},
+    }
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_lever_jobs_single_posting(mock_get) -> None:
+    """_fetch_lever_jobs should normalise a Lever posting into a job dict."""
+    mock_get.return_value.json.return_value = [_lever_posting("Platform Engineer")]
+    mock_get.return_value.raise_for_status.return_value = None
+
+    jobs = _fetch_lever_jobs("https://api.lever.co/v0/postings/acme")
+
+    assert [j["title"] for j in jobs] == ["Platform Engineer"]
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_lever_jobs_excludes_high_clearance_title(mock_get) -> None:
+    """_fetch_lever_jobs should drop a posting whose title alone indicates a Top-Secret-tier clearance."""
+    mock_get.return_value.json.return_value = [_lever_posting("Cloud Engineer (Top Secret Required)")]
+    mock_get.return_value.raise_for_status.return_value = None
+
+    jobs = _fetch_lever_jobs("https://api.lever.co/v0/postings/acme")
+
+    assert jobs == []
+
+
+@patch("worker.handler.requests.get")
+def test_fetch_lever_jobs_flags_ambiguous_clearance_for_review(mock_get) -> None:
+    """_fetch_lever_jobs should keep, but flag, a posting with an unspecified clearance mention in the title."""
+    mock_get.return_value.json.return_value = [_lever_posting("Cloud Engineer (Clearance Required)")]
+    mock_get.return_value.raise_for_status.return_value = None
+
+    jobs = _fetch_lever_jobs("https://api.lever.co/v0/postings/acme")
+
+    assert len(jobs) == 1
+    assert jobs[0]["clearance_review"] is True
+
+
 # --- _fetch_workday_jobs unit tests ---
 
 
@@ -462,6 +541,21 @@ def test_fetch_workday_jobs_allows_public_trust_description(mock_post, mock_get)
 
 @patch("worker.handler.requests.get")
 @patch("worker.handler.requests.post")
+def test_fetch_workday_jobs_flags_ambiguous_clearance_for_review(mock_post, mock_get) -> None:
+    """_fetch_workday_jobs should keep, but flag, a posting with an unspecified clearance mention."""
+    mock_post.return_value.json.return_value = _workday_page([_workday_posting("Cloud Engineer", "R001")], total=1)
+    mock_post.return_value.raise_for_status.return_value = None
+    mock_get.return_value.json.return_value = _workday_job_detail("Security clearance required.")
+    mock_get.return_value.raise_for_status.return_value = None
+
+    jobs = _fetch_workday_jobs("https://acme.wd1.myworkdayjobs.com/acme-careers")
+
+    assert len(jobs) == 1
+    assert jobs[0]["clearance_review"] is True
+
+
+@patch("worker.handler.requests.get")
+@patch("worker.handler.requests.post")
 def test_fetch_workday_jobs_description_fetch_failure_falls_back_to_title(mock_post, mock_get) -> None:
     """_fetch_workday_jobs should keep a relevant, clean-titled posting even if the detail fetch fails."""
     mock_post.return_value.json.return_value = _workday_page([_workday_posting("Platform Engineer", "R001")], total=1)
@@ -475,11 +569,12 @@ def test_fetch_workday_jobs_description_fetch_failure_falls_back_to_title(mock_p
 
 @patch("worker.handler.requests.get")
 @patch("worker.handler.requests.post")
-def test_fetch_workday_jobs_skips_description_fetch_when_clearance_filter_disabled(
+def test_fetch_workday_jobs_skips_description_fetch_when_every_clearance_tier_allowed(
     mock_post, mock_get, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """_fetch_workday_jobs should not fetch a posting's description when ENABLE_CLEARANCE_FILTER is false."""
-    monkeypatch.setenv("ENABLE_CLEARANCE_FILTER", "false")
+    """_fetch_workday_jobs should not fetch a posting's description once every clearance tier is allowed."""
+    monkeypatch.setenv("ALLOW_SECRET_CLEARANCE", "true")
+    monkeypatch.setenv("ALLOW_TOP_SECRET_CLEARANCE", "true")
     mock_post.return_value.json.return_value = _workday_page([_workday_posting("Platform Engineer", "R001")], total=1)
     mock_post.return_value.raise_for_status.return_value = None
 
@@ -786,6 +881,21 @@ def test_fetch_builtin_jobs_allows_public_trust_description(mock_get, aws_resour
 
 
 @patch("worker.handler.requests.get")
+def test_fetch_builtin_jobs_flags_ambiguous_clearance_for_review(mock_get, aws_resources: dict) -> None:
+    """_fetch_builtin_jobs should keep, but flag, a posting with an unspecified clearance mention."""
+    _mock_builtin_gets(
+        mock_get,
+        [_builtin_page_html([_builtin_card_html("Cloud Engineer", "/job/cloud-engineer/1", "Acme", "Remote")])],
+        description="Security clearance required.",
+    )
+
+    jobs = _fetch_builtin_jobs("https://builtin.com/jobs?search=AWS")
+
+    assert len(jobs) == 1
+    assert jobs[0]["clearance_review"] is True
+
+
+@patch("worker.handler.requests.get")
 def test_fetch_builtin_jobs_description_fetch_failure_falls_back_to_title(mock_get, aws_resources: dict) -> None:
     """_fetch_builtin_jobs should keep a relevant, clean-titled posting even if the detail fetch fails."""
     page = _builtin_page_html([_builtin_card_html("Platform Engineer", "/job/platform-engineer/1", "Acme", "Remote")])
@@ -807,11 +917,12 @@ def test_fetch_builtin_jobs_description_fetch_failure_falls_back_to_title(mock_g
 
 
 @patch("worker.handler.requests.get")
-def test_fetch_builtin_jobs_skips_description_fetch_when_clearance_filter_disabled(
+def test_fetch_builtin_jobs_skips_description_fetch_when_every_clearance_tier_allowed(
     mock_get, aws_resources: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """_fetch_builtin_jobs should not fetch a posting's detail page when ENABLE_CLEARANCE_FILTER is false."""
-    monkeypatch.setenv("ENABLE_CLEARANCE_FILTER", "false")
+    """_fetch_builtin_jobs should not fetch a posting's detail page once every clearance tier is allowed."""
+    monkeypatch.setenv("ALLOW_SECRET_CLEARANCE", "true")
+    monkeypatch.setenv("ALLOW_TOP_SECRET_CLEARANCE", "true")
     _mock_builtin_gets(
         mock_get,
         [_builtin_page_html([_builtin_card_html("Cloud Engineer", "/job/cloud-engineer/1", "Acme", "Remote")])],
@@ -914,29 +1025,6 @@ def test_filter_drops_management_titles_despite_keyword_match(title: str) -> Non
     """_filter_relevant_jobs should drop management/leadership titles even if they match a target keyword."""
     result = _filter_relevant_jobs([_job(title)], "Acme")
     assert len(result) == 0
-
-
-@pytest.mark.parametrize(
-    "title",
-    [
-        "Cloud Engineer (Top Secret Required)",
-        "Platform Engineer - TS/SCI Required",
-        "Senior DevOps Engineer (Secret Clearance)",
-        "Cloud Engineer, Polygraph Required",
-        "Infrastructure Engineer (Active Clearance Required)",
-        "Platform Engineer (Clearance Required)",
-    ],
-)
-def test_filter_drops_clearance_gated_titles(title: str) -> None:
-    """_filter_relevant_jobs should drop titles indicating a clearance above Public Trust."""
-    result = _filter_relevant_jobs([_job(title)], "Acme")
-    assert len(result) == 0
-
-
-def test_filter_keeps_public_trust_titles() -> None:
-    """_filter_relevant_jobs should keep titles that only require a Public Trust clearance."""
-    result = _filter_relevant_jobs([_job("Cloud Engineer (Public Trust)")], "Acme")
-    assert len(result) == 1
 
 
 @pytest.mark.parametrize(
@@ -1051,7 +1139,7 @@ def test_filter_empty_input_returns_empty() -> None:
     assert _filter_relevant_jobs([], "Acme") == []
 
 
-# --- _requires_excluded_clearance unit tests ---
+# --- _clearance_decision unit tests ---
 
 
 @pytest.mark.parametrize(
@@ -1059,41 +1147,117 @@ def test_filter_empty_input_returns_empty() -> None:
     [
         "Must have an active Top Secret clearance.",
         "TS/SCI required for this role.",
-        "Candidates must hold a current Secret clearance.",
         "Full scope polygraph required.",
         "This role requires a CI Poly.",
         "SCI clearance is required.",
-        "Active clearance required to start.",
-        "Security clearance is required for this position.",
-        "Clearance sponsorship available for the right candidate.",
+        "Must be willing to submit to a polygraph examination.",
     ],
 )
-def test_requires_excluded_clearance_true_for_high_or_unspecified(text: str) -> None:
-    """_requires_excluded_clearance should flag high-tier and unspecified clearance mentions."""
-    assert _requires_excluded_clearance(text) is True
+def test_clearance_decision_excludes_top_secret_by_default(text: str) -> None:
+    """_clearance_decision should exclude Top-Secret-tier text under the default ALLOW_* env vars."""
+    assert _clearance_decision(text) == (True, False)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Candidates must hold a current Secret clearance.",
+        "Requires an active DoD Secret clearance.",
+        "Interim Secret clearance is acceptable to start.",
+        "Must currently hold a DOE L clearance.",
+    ],
+)
+def test_clearance_decision_excludes_secret_by_default(text: str) -> None:
+    """_clearance_decision should exclude Secret-tier text under the default ALLOW_SECRET_CLEARANCE=false."""
+    assert _clearance_decision(text) == (True, False)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Candidates must hold a current Secret clearance.",
+        "Requires an active DoD Secret clearance.",
+    ],
+)
+def test_clearance_decision_allows_secret_when_enabled(text: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Secret is less invasive than Top Secret (no polygraph/friends-family interviews) — should be
+    keepable independently of the Top Secret tier once ALLOW_SECRET_CLEARANCE is true."""
+    monkeypatch.setenv("ALLOW_SECRET_CLEARANCE", "true")
+    assert _clearance_decision(text) == (False, False)
+
+
+def test_clearance_decision_top_secret_wins_over_secret_substring() -> None:
+    """ "Top Secret clearance" also contains the substring "secret clearance" — the higher tier must win."""
+    assert _clearance_decision("Requires an active Top Secret clearance.") == (True, False)
+
+
+def test_clearance_decision_top_secret_wins_over_public_trust_mention() -> None:
+    """A posting mentioning both Public Trust and a higher tier should still be excluded as Top Secret."""
+    text = "Public Trust for some roles; this position requires an active Top Secret clearance."
+    assert _clearance_decision(text) == (True, False)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "This position requires a Public Trust clearance.",
+        "Candidates must be eligible for Public Trust.",
+    ],
+)
+def test_clearance_decision_allows_public_trust_by_default(text: str) -> None:
+    """_clearance_decision should keep Public Trust text under the default ALLOW_PUBLIC_TRUST=true."""
+    assert _clearance_decision(text) == (False, False)
+
+
+def test_clearance_decision_excludes_public_trust_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_clearance_decision should exclude Public Trust text when ALLOW_PUBLIC_TRUST is false."""
+    monkeypatch.setenv("ALLOW_PUBLIC_TRUST", "false")
+    assert _clearance_decision("This position requires a Public Trust clearance.") == (True, False)
 
 
 @pytest.mark.parametrize(
     "text",
     [
         "No clearance required for this role.",
-        "This position requires a Public Trust clearance.",
-        "Candidates must be eligible for Public Trust.",
         "Remote-friendly software engineering role.",
     ],
 )
-def test_requires_excluded_clearance_false_for_public_trust_or_none(text: str) -> None:
-    """_requires_excluded_clearance should allow Public Trust and clearance-free postings."""
-    assert _requires_excluded_clearance(text) is False
+def test_clearance_decision_none_for_no_clearance_mention(text: str) -> None:
+    """_clearance_decision should keep text with no clearance mention, or an explicit negation."""
+    assert _clearance_decision(text) == (False, False)
 
 
-def test_requires_excluded_clearance_high_tier_wins_over_public_trust_mention() -> None:
-    """A posting mentioning both Public Trust and a higher tier should still be excluded."""
-    text = "Public Trust for some roles; this position requires an active Top Secret clearance."
-    assert _requires_excluded_clearance(text) is True
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Active clearance required to start.",
+        "Security clearance is required for this position.",
+        "Clearance sponsorship available for the right candidate.",
+    ],
+)
+def test_clearance_decision_flags_ambiguous_mentions_for_review_by_default(text: str) -> None:
+    """A generic/unspecified clearance mention (no level stated) can't be resolved from text alone —
+    it shouldn't be excluded outright, but flagged for manual review instead."""
+    assert _clearance_decision(text) == (False, True)
 
 
-def test_requires_excluded_clearance_ignores_eppa_boilerplate() -> None:
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Active clearance required to start.",
+        "Security clearance is required for this position.",
+    ],
+)
+def test_clearance_decision_ambiguous_needs_no_review_once_every_tier_is_allowed(
+    text: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ambiguous mention has nothing left to resolve once every tier is already allowed."""
+    monkeypatch.setenv("ALLOW_SECRET_CLEARANCE", "true")
+    monkeypatch.setenv("ALLOW_TOP_SECRET_CLEARANCE", "true")
+    assert _clearance_decision(text) == (False, False)
+
+
+def test_clearance_decision_ignores_eppa_boilerplate() -> None:
     """The standard EPPA legal notice mentions 'polygraph' but isn't a clearance requirement.
 
     Regression test: this boilerplate is present on nearly every US company's
@@ -1103,18 +1267,14 @@ def test_requires_excluded_clearance_ignores_eppa_boilerplate() -> None:
         "Software Engineer. We are an equal opportunity employer. "
         "Employee Polygraph Protection Act (EPPA) Poster and other required notices apply."
     )
-    assert _requires_excluded_clearance(text) is False
+    assert _clearance_decision(text) == (False, False)
 
 
-def test_requires_excluded_clearance_still_catches_real_polygraph_mention() -> None:
-    """A genuine clearance-related polygraph mention outside the EPPA notice should still exclude."""
-    assert _requires_excluded_clearance("Must be willing to submit to a polygraph examination.") is True
-
-
-def test_requires_excluded_clearance_false_when_filter_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_requires_excluded_clearance should always return False when ENABLE_CLEARANCE_FILTER is not "true"."""
-    monkeypatch.setenv("ENABLE_CLEARANCE_FILTER", "false")
-    assert _requires_excluded_clearance("Must have an active Top Secret clearance.") is False
+def test_clearance_decision_everything_allowed_never_excludes_or_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With every ALLOW_* tier true, even Top-Secret-tier text should be kept and not flagged for review."""
+    monkeypatch.setenv("ALLOW_SECRET_CLEARANCE", "true")
+    monkeypatch.setenv("ALLOW_TOP_SECRET_CLEARANCE", "true")
+    assert _clearance_decision("Must have an active Top Secret clearance.") == (False, False)
 
 
 # --- _is_non_us_location unit tests ---

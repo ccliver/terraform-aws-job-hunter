@@ -25,12 +25,26 @@ Environment variables expected:
     JOBS_TABLE      - DynamoDB table name for job postings
     COMPANIES_TABLE - DynamoDB table name for tracked companies (used by the
                        builtin ATS backend to skip already-tracked companies)
-    ENABLE_CLEARANCE_FILTER - "true"/"false"; drop postings requiring a
-                       clearance above Public Trust (see
-                       _requires_excluded_clearance). When "false", the
+    ALLOW_PUBLIC_TRUST      - "true"/"false"; whether to keep postings
+                       requiring a Public Trust clearance (see
+                       _clearance_decision).
+    ALLOW_SECRET_CLEARANCE  - "true"/"false"; whether to keep postings
+                       requiring a Secret-tier clearance (Secret, DoD Secret,
+                       Interim Secret, or the DOE-equivalent L clearance) —
+                       no polygraph or friends/family interviews required.
+    ALLOW_TOP_SECRET_CLEARANCE - "true"/"false"; whether to keep postings
+                       requiring a Top-Secret-tier or above clearance (Top
+                       Secret, TS/SCI, a polygraph, a Special Access Program,
+                       or the DOE-equivalent Q clearance).
+                       A generic/unspecified clearance mention with no level
+                       given is never excluded outright — it's kept and
+                       flagged (clearance_review=True on the job dict, and
+                       written to DynamoDB) for manual review in the
+                       notifier digest instead, unless every tier above is
+                       already allowed. When every tier is allowed, the
                        Workday/Built In fetchers also skip the extra
                        per-posting detail-page request that exists only to
-                       feed this check.
+                       feed this check — see _clearance_screening_needed.
     LOCATION          - Comma-separated location substrings to additionally
                          keep (OR'd together) for every ATS backend except
                          builtin; blank disables it (remote-only)
@@ -109,28 +123,34 @@ def _exclude_title_keywords() -> list[str]:
     return [kw.strip().lower() for kw in os.environ["EXCLUDE_TITLE_KEYWORDS"].split(",") if kw.strip()]
 
 
-# Clearance tiers above Public Trust — the highest tier the user will pursue.
-# A "public trust" mention (with none of these) is explicitly allowed.
-_HIGH_CLEARANCE_KEYWORDS = [
+# Top-Secret-and-above keywords — the tier that requires a polygraph and
+# friends/family interviews. Checked before _SECRET_KEYWORDS since some
+# phrases overlap as substrings (e.g. "top secret clearance" also contains
+# "secret clearance"); check order makes the higher tier win.
+_TOP_SECRET_KEYWORDS = [
     "top secret",
     "ts/sci",
     "ts-sci",
-    "secret clearance",
-    "dod secret",
-    "interim secret",
     "polygraph",
     "full scope poly",
     "ci poly",
     "sci clearance",
     "special access program",
     "sap clearance",
-    "q clearance",
-    "l clearance",
+    "q clearance",  # DOE's Top-Secret-equivalent
 ]
 
-# Unspecified/generic clearance mentions with no level given are treated as
-# excluded too — unspecified clearance postings at defense contractors
-# conventionally mean Secret or above — unless "public trust" is also present.
+# Secret-tier keywords — no polygraph or friends/family interviews required.
+_SECRET_KEYWORDS = [
+    "secret clearance",
+    "dod secret",
+    "interim secret",
+    "l clearance",  # DOE's Secret-equivalent
+]
+
+# Unspecified/generic clearance mentions with no level given — the actual
+# tier can't be determined from text alone, so these are never excluded
+# outright; see _clearance_decision.
 _GENERIC_CLEARANCE_KEYWORDS = [
     "security clearance",
     "active clearance",
@@ -162,41 +182,83 @@ _CLEARANCE_FALSE_POSITIVE_PHRASES = [
 ]
 
 
-def _clearance_filter_enabled() -> bool:
-    """Whether ENABLE_CLEARANCE_FILTER is set to "true".
+def _allow_public_trust() -> bool:
+    return os.environ["ALLOW_PUBLIC_TRUST"].lower() == "true"
 
-    Checked both by _requires_excluded_clearance itself and, separately, by
-    the Workday/Built In fetchers before their extra per-posting detail-page
-    request — that request exists solely to feed _requires_excluded_clearance
-    text it can't get from the title/search-result alone, so there's no
-    reason to make it when the filter is off.
+
+def _allow_secret_clearance() -> bool:
+    return os.environ["ALLOW_SECRET_CLEARANCE"].lower() == "true"
+
+
+def _allow_top_secret_clearance() -> bool:
+    return os.environ["ALLOW_TOP_SECRET_CLEARANCE"].lower() == "true"
+
+
+def _clearance_screening_needed() -> bool:
+    """Whether a posting's clearance requirement could still affect the outcome.
+
+    False only when every tier (Public Trust, Secret, Top Secret) is
+    allowed — in that case no clearance mention could exclude a posting, and
+    an ambiguous mention has nothing left to resolve either. The Workday and
+    Built In fetchers skip their extra per-posting detail-page request in
+    that case, since it exists solely to feed _clearance_decision.
     """
-    return os.environ["ENABLE_CLEARANCE_FILTER"].lower() == "true"
+    return not (_allow_public_trust() and _allow_secret_clearance() and _allow_top_secret_clearance())
 
 
-def _requires_excluded_clearance(text: str) -> bool:
-    """Check whether text indicates a clearance requirement above Public Trust.
+def _clearance_tier(text: str) -> str:
+    """Classify text's clearance requirement into a tier.
 
-    Public Trust is the one clearance level the user will pursue, so an
-    explicit "public trust" mention (with no higher-tier keyword present) is
-    allowed, as is an explicit "no clearance required" negation. A
-    generic/unspecified clearance mention with no level given is treated as
-    excluded by default. Known false-positive boilerplate (e.g. the EPPA
-    notice) is stripped before matching. Always False if ENABLE_CLEARANCE_FILTER
-    is not "true" — see _clearance_filter_enabled.
+    Returns "top_secret", "secret", "public_trust", "ambiguous" (a
+    generic/unspecified mention with no level given), or "none" (no
+    clearance mentioned, or an explicit "no clearance required" negation).
+    Known false-positive boilerplate (e.g. the EPPA notice, which mentions
+    "polygraph" but has nothing to do with government clearance) is stripped
+    before matching. Checked highest tier first so overlapping substrings
+    (e.g. "top secret clearance" also containing "secret clearance") resolve
+    to the higher tier.
     """
-    if not _clearance_filter_enabled():
-        return False
     text_lower = text.lower()
     for phrase in _CLEARANCE_FALSE_POSITIVE_PHRASES:
         text_lower = text_lower.replace(phrase, "")
-    if any(kw in text_lower for kw in _HIGH_CLEARANCE_KEYWORDS):
-        return True
+    if any(kw in text_lower for kw in _TOP_SECRET_KEYWORDS):
+        return "top_secret"
+    if any(kw in text_lower for kw in _SECRET_KEYWORDS):
+        return "secret"
     if "public trust" in text_lower:
-        return False
+        return "public_trust"
     if any(phrase in text_lower for phrase in _NO_CLEARANCE_PHRASES):
-        return False
-    return any(kw in text_lower for kw in _GENERIC_CLEARANCE_KEYWORDS)
+        return "none"
+    if any(kw in text_lower for kw in _GENERIC_CLEARANCE_KEYWORDS):
+        return "ambiguous"
+    return "none"
+
+
+def _clearance_decision(text: str) -> tuple[bool, bool]:
+    """Decide whether text's clearance requirement should exclude the posting.
+
+    Returns (excluded, needs_review):
+      - "top_secret"/"secret"/"public_trust": excluded is the inverse of
+        that tier's ALLOW_* env var; the tier is known, so needs_review is
+        always False.
+      - "ambiguous": never excluded outright — a generic mention with no
+        level given could be any tier, and guessing risks hiding a posting
+        the user would've been fine with. Flagged for manual review
+        (needs_review=True) via the notifier digest instead, unless every
+        tier is already allowed (_clearance_screening_needed() is False), in
+        which case a review would be pointless.
+      - "none": kept, no review needed.
+    """
+    tier = _clearance_tier(text)
+    if tier == "top_secret":
+        return not _allow_top_secret_clearance(), False
+    if tier == "secret":
+        return not _allow_secret_clearance(), False
+    if tier == "public_trust":
+        return not _allow_public_trust(), False
+    if tier == "ambiguous":
+        return False, _clearance_screening_needed()
+    return False, False
 
 
 # Countries, business regions, and common offshore/nearshore tech-hub cities
@@ -371,22 +433,26 @@ def _make_job_id(company: str, title: str, url: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _filter_relevant_jobs(jobs: list[dict[str, str]], company: str) -> list[dict[str, str]]:
+def _filter_relevant_jobs(jobs: list[dict[str, Any]], company: str) -> list[dict[str, Any]]:
     """Drop jobs whose title doesn't match a target-role keyword, or matches an excluded one.
 
     Performs case-insensitive substring matching against TITLE_KEYWORDS,
     then drops any of those matches whose title also hits EXCLUDE_TITLE_KEYWORDS
-    (management/leadership roles), indicates a clearance requirement above
-    Public Trust, has a location indicating a non-US posting, or (for every
-    backend except "builtin") doesn't match the configured LOCATION/WORK_TYPE.
-    Built In jobs are exempt from that last check since they're already
-    filtered by their own independent BUILTIN_LOCATION/BUILTIN_WORK_TYPE
-    config in _fetch_builtin_jobs — detected here via the per-job "company"
-    key, which only the builtin backend sets. The clearance check is
-    title-only here and applies uniformly across every ATS backend;
-    _fetch_greenhouse_jobs, _fetch_workday_jobs, and _fetch_builtin_jobs
-    additionally check the full job description. Logs extracted vs. matched
-    counts so the keyword lists can be tuned.
+    (management/leadership roles), has a location indicating a non-US
+    posting, or (for every backend except "builtin") doesn't match the
+    configured LOCATION/WORK_TYPE. Built In jobs are exempt from that last
+    check since they're already filtered by their own independent
+    BUILTIN_LOCATION/BUILTIN_WORK_TYPE config in _fetch_builtin_jobs —
+    detected here via the per-job "company" key, which only the builtin
+    backend sets. Clearance filtering isn't done here: every fetcher (_fetch_
+    greenhouse_jobs/_fetch_lever_jobs/_fetch_workday_jobs/_fetch_builtin_jobs)
+    already applies _clearance_decision itself, using the fullest text it has
+    available (title alone for Lever, title+description for the others) —
+    re-checking title-only text here could contradict a decision the fetcher
+    already made using the full description (e.g. a title alone might look
+    like an unspecified/ambiguous clearance mention that the full description
+    actually resolved to an allowed Public Trust posting). Logs extracted vs.
+    matched counts so the keyword lists can be tuned.
 
     Args:
         jobs: Raw list of job dicts with at least a "title" key.
@@ -394,13 +460,12 @@ def _filter_relevant_jobs(jobs: list[dict[str, str]], company: str) -> list[dict
 
     Returns:
         Subset of jobs whose title matched a target keyword, hit no exclude
-        or excluded-clearance keyword, whose location isn't non-US, and
-        (unless from the builtin backend) matches the configured work type.
+        keyword, whose location isn't non-US, and (unless from the builtin
+        backend) matches the configured work type.
     """
     matched = [j for j in jobs if any(kw in j.get("title", "").lower() for kw in _title_keywords())]
     filtered = [j for j in matched if not any(kw in j["title"].lower() for kw in _exclude_title_keywords())]
-    cleared = [j for j in filtered if not _requires_excluded_clearance(j["title"])]
-    us_only = [j for j in cleared if not _is_non_us_location(j.get("location", ""))]
+    us_only = [j for j in filtered if not _is_non_us_location(j.get("location", ""))]
     work_type_matched = [j for j in us_only if "company" in j or _location_matches(j.get("location", ""))]
     logger.info(
         "Job filter complete",
@@ -408,27 +473,27 @@ def _filter_relevant_jobs(jobs: list[dict[str, str]], company: str) -> list[dict
         extracted=len(jobs),
         matched=len(matched),
         excluded=len(matched) - len(filtered),
-        clearance_excluded=len(filtered) - len(cleared),
-        non_us_excluded=len(cleared) - len(us_only),
+        non_us_excluded=len(filtered) - len(us_only),
         work_type_excluded=len(us_only) - len(work_type_matched),
         dropped=len(jobs) - len(work_type_matched),
     )
     return work_type_matched
 
 
-def _fetch_greenhouse_jobs(careers_url: str) -> list[dict[str, str]]:
+def _fetch_greenhouse_jobs(careers_url: str) -> list[dict[str, Any]]:
     """Fetch job listings from a Greenhouse JSON API endpoint.
 
     Requests full job descriptions (content=true) at no extra cost — the
-    Greenhouse list endpoint includes them in the same response — so postings
-    requiring a clearance above Public Trust can be dropped even when the
-    title alone doesn't say so.
+    Greenhouse list endpoint includes them in the same response — so
+    excluded-tier postings can be dropped even when the title alone doesn't
+    say so. See _clearance_decision.
 
     Args:
         careers_url: Greenhouse board API URL (already returns JSON).
 
     Returns:
-        Normalised list of job dicts with title, url, location keys.
+        Normalised list of job dicts with title, url, location keys (plus
+        clearance_review=True for jobs with an ambiguous clearance mention).
     """
     try:
         resp = requests.get(careers_url, params={"content": "true"}, timeout=30)
@@ -451,28 +516,35 @@ def _fetch_greenhouse_jobs(careers_url: str) -> list[dict[str, str]]:
     clearance_skipped = 0
     for posting in data.get("jobs", []):
         title = posting.get("title", "")
-        if _requires_excluded_clearance(f"{title} {posting.get('content', '')}"):
+        excluded, needs_review = _clearance_decision(f"{title} {posting.get('content', '')}")
+        if excluded:
             clearance_skipped += 1
             continue
-        jobs.append(
-            {
-                "title": title,
-                "url": posting.get("absolute_url", careers_url),
-                "location": posting.get("location", {}).get("name", ""),
-            }
-        )
+        job = {
+            "title": title,
+            "url": posting.get("absolute_url", careers_url),
+            "location": posting.get("location", {}).get("name", ""),
+        }
+        if needs_review:
+            job["clearance_review"] = True
+        jobs.append(job)
     logger.info("Greenhouse jobs fetched", url=careers_url, count=len(jobs), clearance_skipped=clearance_skipped)
     return jobs
 
 
-def _fetch_lever_jobs(careers_url: str) -> list[dict[str, str]]:
+def _fetch_lever_jobs(careers_url: str) -> list[dict[str, Any]]:
     """Fetch job listings from a Lever JSON API endpoint.
+
+    The list response carries no job description, so the clearance check
+    (_clearance_decision) is title-only here, unlike Greenhouse/Workday/Built
+    In which also see the full description.
 
     Args:
         careers_url: Lever postings API URL (already returns JSON).
 
     Returns:
-        Normalised list of job dicts with title, url, location keys.
+        Normalised list of job dicts with title, url, location keys (plus
+        clearance_review=True for jobs with an ambiguous clearance mention).
     """
     try:
         resp = requests.get(careers_url, timeout=30)
@@ -492,15 +564,22 @@ def _fetch_lever_jobs(careers_url: str) -> list[dict[str, str]]:
         return []
 
     jobs = []
+    clearance_skipped = 0
     for posting in data:
-        jobs.append(
-            {
-                "title": posting.get("text", ""),
-                "url": posting.get("hostedUrl", careers_url),
-                "location": posting.get("categories", {}).get("location", ""),
-            }
-        )
-    logger.info("Lever jobs fetched", url=careers_url, count=len(jobs))
+        title = posting.get("text", "")
+        excluded, needs_review = _clearance_decision(title)
+        if excluded:
+            clearance_skipped += 1
+            continue
+        job = {
+            "title": title,
+            "url": posting.get("hostedUrl", careers_url),
+            "location": posting.get("categories", {}).get("location", ""),
+        }
+        if needs_review:
+            job["clearance_review"] = True
+        jobs.append(job)
+    logger.info("Lever jobs fetched", url=careers_url, count=len(jobs), clearance_skipped=clearance_skipped)
     return jobs
 
 
@@ -522,7 +601,7 @@ def _fetch_workday_job_description(tenant: str, wd: str, site: str, external_pat
     return data.get("jobPostingInfo", {}).get("jobDescription", "")
 
 
-def _fetch_workday_jobs(careers_url: str) -> list[dict[str, str]]:
+def _fetch_workday_jobs(careers_url: str) -> list[dict[str, Any]]:
     """Fetch job listings from a Workday-hosted careers site via its unofficial JSON API.
 
     Parses the tenant/site from a myworkdayjobs.com careers URL, then issues
@@ -543,7 +622,8 @@ def _fetch_workday_jobs(careers_url: str) -> list[dict[str, str]]:
     descriptions for) the same posting. For postings whose title already
     looks relevant, a follow-up request fetches the full description to
     catch clearance requirements that aren't mentioned in the title — skipped
-    entirely when ENABLE_CLEARANCE_FILTER is off, since that's its only use.
+    entirely when _clearance_screening_needed() is False, since that's its
+    only use.
 
     Args:
         careers_url: Careers URL of the form
@@ -599,19 +679,21 @@ def _fetch_workday_jobs(careers_url: str) -> list[dict[str, str]]:
                 seen_paths.add(external_path)
                 description = (
                     _fetch_workday_job_description(tenant, wd, site, external_path)
-                    if _clearance_filter_enabled()
+                    if _clearance_screening_needed()
                     else ""
                 )
-                if _requires_excluded_clearance(f"{title} {description}"):
+                excluded, needs_review = _clearance_decision(f"{title} {description}")
+                if excluded:
                     clearance_skipped += 1
                     continue
-                jobs.append(
-                    {
-                        "title": title,
-                        "url": base_url + external_path,
-                        "location": posting.get("locationsText", ""),
-                    }
-                )
+                job = {
+                    "title": title,
+                    "url": base_url + external_path,
+                    "location": posting.get("locationsText", ""),
+                }
+                if needs_review:
+                    job["clearance_review"] = True
+                jobs.append(job)
 
             offset += _WORKDAY_PAGE_SIZE
             if offset >= data.get("total", 0):
@@ -735,7 +817,7 @@ def _fetch_builtin_job_description(url: str) -> str:
     return soup.get_text(separator=" ", strip=True)
 
 
-def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, str]]:
+def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, Any]]:
     """Fetch job listings from a Built In (builtin.com) search results page.
 
     The search page is server-rendered, so a plain GET is enough — no
@@ -750,8 +832,8 @@ def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, str]]:
     detail page fetches the full description to catch clearance requirements
     that aren't mentioned in the title — same pattern as _fetch_workday_jobs,
     and for the same reason (avoid an extra request per irrelevant posting);
-    also skipped entirely when ENABLE_CLEARANCE_FILTER is off. Postings are
-    also dropped by _builtin_location_matches (BUILTIN_LOCATION /
+    also skipped entirely when _clearance_screening_needed() is False.
+    Postings are also dropped by _builtin_location_matches (BUILTIN_LOCATION /
     BUILTIN_WORK_TYPE env vars) before the description fetch, for the same
     cost-avoidance reason.
 
@@ -810,18 +892,20 @@ def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, str]]:
                 continue
             href = title_el.get("href", "")
             job_url = _BUILTIN_BASE_URL + (href if isinstance(href, str) else "")
-            description = _fetch_builtin_job_description(job_url) if _clearance_filter_enabled() else ""
-            if _requires_excluded_clearance(f"{title} {description}"):
+            description = _fetch_builtin_job_description(job_url) if _clearance_screening_needed() else ""
+            excluded, needs_review = _clearance_decision(f"{title} {description}")
+            if excluded:
                 clearance_skipped += 1
                 continue
-            jobs.append(
-                {
-                    "title": title,
-                    "url": job_url,
-                    "location": location,
-                    "company": company,
-                }
-            )
+            job = {
+                "title": title,
+                "url": job_url,
+                "location": location,
+                "company": company,
+            }
+            if needs_review:
+                job["clearance_review"] = True
+            jobs.append(job)
 
     logger.info(
         "Built In jobs fetched",
@@ -833,7 +917,7 @@ def _fetch_builtin_jobs(careers_url: str) -> list[dict[str, str]]:
     return jobs
 
 
-def _fetch_jobs(company_name: str, careers_url: str, ats: str) -> list[dict[str, str]]:
+def _fetch_jobs(company_name: str, careers_url: str, ats: str) -> list[dict[str, Any]]:
     """Dispatch to the appropriate ATS handler and return normalised job dicts.
 
     Args:
@@ -904,6 +988,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "location": job.get("location", ""),
                 "discovered_at": datetime.now(UTC).isoformat(),
             }
+            if job.get("clearance_review"):
+                item["clearance_review"] = True
             # condition_expression prevents overwriting existing items
             try:
                 table.put_item(

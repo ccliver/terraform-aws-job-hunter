@@ -103,15 +103,27 @@ run "worker_receives_configured_title_keywords" {
   }
 }
 
-run "worker_receives_clearance_filter_toggle" {
+run "worker_receives_clearance_tier_toggles" {
   command = plan
 
   variables {
-    enable_clearance_filter = false
+    allow_public_trust         = false
+    allow_secret_clearance     = true
+    allow_top_secret_clearance = true
   }
 
   assert {
-    condition     = aws_lambda_function.worker.environment[0].variables["ENABLE_CLEARANCE_FILTER"] == "false"
-    error_message = "Worker Lambda should receive the configured ENABLE_CLEARANCE_FILTER env var"
+    condition     = aws_lambda_function.worker.environment[0].variables["ALLOW_PUBLIC_TRUST"] == "false"
+    error_message = "Worker Lambda should receive the configured ALLOW_PUBLIC_TRUST env var"
+  }
+
+  assert {
+    condition     = aws_lambda_function.worker.environment[0].variables["ALLOW_SECRET_CLEARANCE"] == "true"
+    error_message = "Worker Lambda should receive the configured ALLOW_SECRET_CLEARANCE env var"
+  }
+
+  assert {
+    condition     = aws_lambda_function.worker.environment[0].variables["ALLOW_TOP_SECRET_CLEARANCE"] == "true"
+    error_message = "Worker Lambda should receive the configured ALLOW_TOP_SECRET_CLEARANCE env var"
   }
 }

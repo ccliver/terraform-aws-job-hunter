@@ -55,7 +55,11 @@ module "job_hunter" {
   exclude_title_keywords = "manager,director" # dropped even if they also match title_keywords
 
   # --- Clearance filtering ---
-  enable_clearance_filter = true # drop postings requiring a clearance above Public Trust; also skips an extra per-posting detail-page fetch on Workday/Built In when false
+  # An ambiguous/unspecified clearance mention is never dropped by these — it's
+  # kept and flagged for manual review in the notifier digest instead.
+  allow_public_trust         = true  # no polygraph or friends/family interviews
+  allow_secret_clearance     = false # also no polygraph/interviews required, but not yet worth pursuing
+  allow_top_secret_clearance = false # requires a polygraph and friends/family interviews
 
   # --- Lambda sizing ---
   lambda_timeout_seconds = 300

@@ -102,6 +102,32 @@ def test_build_email_body_escapes_html_special_characters() -> None:
     assert "<Platform>" not in html
 
 
+def test_build_email_body_flags_ambiguous_clearance_jobs() -> None:
+    """Email body should mark a job flagged clearance_review=True for manual review."""
+    jobs = [
+        {
+            "title": "Cloud Engineer",
+            "company": "Acme",
+            "url": "https://acme.com/1",
+            "location": "Remote",
+            "clearance_review": True,
+        }
+    ]
+    text, html = _build_email_body(jobs)
+
+    assert "[CLEARANCE UNCLEAR - PLEASE VERIFY]" in text
+    assert "CLEARANCE UNCLEAR" in html
+
+
+def test_build_email_body_omits_clearance_flag_when_not_set() -> None:
+    """Email body should not mention clearance review for a normal job."""
+    jobs = [{"title": "Cloud Engineer", "company": "Acme", "url": "https://acme.com/1", "location": "Remote"}]
+    text, html = _build_email_body(jobs)
+
+    assert "CLEARANCE" not in text
+    assert "CLEARANCE" not in html
+
+
 def test_build_email_body_omits_location_line_when_blank() -> None:
     """Email body should not render an empty location line when location is missing."""
     jobs = [{"title": "SWE", "company": "Acme", "url": "https://acme.com/1", "location": ""}]

@@ -98,10 +98,26 @@ variable "exclude_title_keywords" {
   default     = "manager,director"
 }
 
-variable "enable_clearance_filter" {
-  description = "Whether to drop job postings that require a security clearance above Public Trust. When false, the Workday and Built In backends also skip the extra per-posting detail-page request that exists only to feed this check"
+# A posting with a generic/unspecified clearance mention (no level stated) is
+# never dropped by any of these three — the tier can't be determined from
+# text alone, so it's kept and flagged for manual review in the notifier
+# digest instead, unless every tier below is already allowed.
+variable "allow_public_trust" {
+  description = "Whether to keep job postings that require a Public Trust clearance"
   type        = bool
   default     = true
+}
+
+variable "allow_secret_clearance" {
+  description = "Whether to keep job postings that require a Secret-tier clearance (Secret, DoD Secret, Interim Secret, or the DOE-equivalent L clearance) — no polygraph or friends/family interviews required"
+  type        = bool
+  default     = false
+}
+
+variable "allow_top_secret_clearance" {
+  description = "Whether to keep job postings that require a Top-Secret-tier or above clearance (Top Secret, TS/SCI, a polygraph, a Special Access Program, or the DOE-equivalent Q clearance)"
+  type        = bool
+  default     = false
 }
 
 variable "lambda_timeout_seconds" {

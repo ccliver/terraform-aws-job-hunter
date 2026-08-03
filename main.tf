@@ -177,15 +177,17 @@ resource "aws_lambda_function" "worker" {
 
   environment {
     variables = {
-      JOBS_TABLE              = aws_dynamodb_table.jobs.name
-      COMPANIES_TABLE         = aws_dynamodb_table.companies.name
-      BUILTIN_LOCATION        = var.builtin_location
-      BUILTIN_WORK_TYPE       = var.builtin_work_type
-      LOCATION                = var.location
-      WORK_TYPE               = var.work_type
-      TITLE_KEYWORDS          = var.title_keywords
-      EXCLUDE_TITLE_KEYWORDS  = var.exclude_title_keywords
-      ENABLE_CLEARANCE_FILTER = tostring(var.enable_clearance_filter)
+      JOBS_TABLE                 = aws_dynamodb_table.jobs.name
+      COMPANIES_TABLE            = aws_dynamodb_table.companies.name
+      BUILTIN_LOCATION           = var.builtin_location
+      BUILTIN_WORK_TYPE          = var.builtin_work_type
+      LOCATION                   = var.location
+      WORK_TYPE                  = var.work_type
+      TITLE_KEYWORDS             = var.title_keywords
+      EXCLUDE_TITLE_KEYWORDS     = var.exclude_title_keywords
+      ALLOW_PUBLIC_TRUST         = tostring(var.allow_public_trust)
+      ALLOW_SECRET_CLEARANCE     = tostring(var.allow_secret_clearance)
+      ALLOW_TOP_SECRET_CLEARANCE = tostring(var.allow_top_secret_clearance)
     }
   }
 }
