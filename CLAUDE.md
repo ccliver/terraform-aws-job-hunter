@@ -2,7 +2,7 @@
 
 ## Project overview
 
-terraform-aws-job-hunter is an AWS serverless application that monitors company careers pages and emails a daily digest of new job postings. It uses three Lambda functions orchestrated by EventBridge, with SQS for fan-out, DynamoDB for storage, and SES for email delivery.
+terraform-aws-req-aggregator is an AWS serverless application that monitors company careers pages and emails a daily digest of new job postings. It uses three Lambda functions orchestrated by EventBridge, with SQS for fan-out, DynamoDB for storage, and SES for email delivery.
 
 ```
 EventBridge cron → Orchestrator Lambda → SQS (1 msg/company)
@@ -15,8 +15,6 @@ EventBridge cron (+30min) → Notifier Lambda → SES email digest
 ```
 
 ## Repo layout
-
-This repo IS a Terraform module (repo root = module root) — there is no separate `terraform/` subdirectory, and no backend/provider/tfvars of its own. It has never had a live deployment directly attached since the flatten-to-module restructure; a separate private repo instantiates it (see `job-hunter` sibling repo, not part of this codebase).
 
 ```
 main.tf                          # all resources (IAM, Lambda, SQS, DynamoDB, EventBridge) + self-build wiring
@@ -88,7 +86,7 @@ cd examples/complete && terraform init && terraform plan   # exercises the modul
 ## Terraform conventions
 
 - This repo is a **standalone callable module** (repo root = module root, matching the `terraform-aws-modules` convention) — `versions.tf` declares only `required_providers`, deliberately no `provider` block and no `backend` block. A `provider`/`backend` block inside a module either breaks the consumer's ability to use `count`/`for_each`/`depends_on` on the module call, or (for backend) is a hard Terraform error when the module is referenced via `source = ...`. Both belong exclusively to whatever root configuration instantiates this module.
-- All resources use `local.prefix` (`= var.prefix`, default `"job-hunter"`) for naming — deliberately independent of the repo/module name.
+- All resources use `local.prefix` (`= var.prefix`, default `"req-aggregator"`) for naming — deliberately independent of the repo/module name.
 - **Lambda packaging is fully automatic, no separate build step.** `data.external.lambda_build` (in `main.tf`, `for_each` over the three function names) invokes `scripts/build-lambda-package.sh <name>` during every `plan`/`apply`; the script hashes `src/{name}/`, only re-runs `pip3 install --platform manylinux2014_x86_64 --python-version 3.13 --implementation cp --only-binary=:all: --target .build/{name} src/{name}` + `zip` when that hash changed, and always reports the built zip's base64 SHA-256 (matching `filebase64sha256()`'s format) as the `external` data source's result. Each Lambda's `source_code_hash` reads `data.external.lambda_build["{name}"].result.hash`; `filename` stays a plain `${path.module}/.build/{name}.zip` reference. This deliberately avoids a `null_resource` + `depends_on` + `filebase64sha256()` design, which hits a chicken-and-egg failure on a fresh checkout (`filebase64sha256()` evaluates during plan regardless of `depends_on`, before the zip exists) — a `data` source has no such ordering problem, since the script producing the zip IS the thing reporting its hash. Because referencing this module via a bare git source (no `//subpath`, repo root = module root) clones the whole repo including `src/` into the consumer's `.terraform/modules/` cache, `${path.module}/src/{name}` reaches the right code with zero separate distribution mechanism — confirmed working end-to-end via `examples/complete/`. Requires `bash`, `pip3`/`python3.13`, `zip`, `openssl` on whatever machine runs `terraform apply`. The worker previously shipped as a container image (needed for a since-removed Playwright + Bedrock dependency — see the `worker/handler.py` note above); that was dropped once the dependency was gone, and this `data.external` design later replaced the plain-zip-plus-manual-build-step approach that followed it, removing the last manual pre-`apply` step entirely.
 - IAM policies follow least-privilege per Lambda.
 - SQS queues use `sqs_managed_sse_enabled = true`.

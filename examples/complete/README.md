@@ -1,6 +1,6 @@
 # Complete example
 
-Demonstrates every variable the `terraform-aws-job-hunter` module accepts, with comments explaining each one. This is documentation you can run, not a ready-to-deploy stack:
+Demonstrates every variable the `terraform-aws-req-aggregator` module accepts, with comments explaining each one. This is documentation you can run, not a ready-to-deploy stack:
 
 - `ses_from_address`/`ses_to_address` are placeholders — replace with addresses verified in SES first.
 - There's no backend block, so `terraform apply` here would use local state. A real deployment should have its own root configuration (its own backend, provider, and `terraform.tfvars`) that calls this module the same way `main.tf` does here.
@@ -28,7 +28,7 @@ No providers.
 
 | Name | Source | Version |
 | ---- | ------ | ------- |
-| <a name="module_job_hunter"></a> [job\_hunter](#module\_job\_hunter) | ../.. | n/a |
+| <a name="module_req_aggregator"></a> [req\_aggregator](#module\_req\_aggregator) | ../.. | n/a |
 
 ## Resources
 

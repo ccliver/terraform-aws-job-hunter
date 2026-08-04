@@ -1,4 +1,4 @@
-# terraform-aws-job-hunter
+# terraform-aws-req-aggregator
 
 Automated job board monitor. An EventBridge cron fans out one Lambda per company to scrape careers pages, deduplicates results in DynamoDB, and emails a daily digest via SES.
 
@@ -15,12 +15,12 @@ Clearance filtering is tiered, not a blanket cutoff: Public Trust, Secret, and T
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.png">
-  <img src="docs/architecture-light.png" alt="job-hunter architecture: EventBridge triggers the Orchestrator Lambda, which scans the DynamoDB companies table and fans out one SQS message per company (with a DLQ for failures). The Worker Lambda consumes each message, fetching jobs via Greenhouse/Lever/Workday/Built In APIs, filters them, and writes new postings to the DynamoDB jobs table. A second EventBridge schedule triggers the Notifier Lambda, which scans recent jobs and sends an HTML digest via SES.">
+  <img src="docs/architecture-light.png" alt="req-aggregator architecture: EventBridge triggers the Orchestrator Lambda, which scans the DynamoDB companies table and fans out one SQS message per company (with a DLQ for failures). The Worker Lambda consumes each message, fetching jobs via Greenhouse/Lever/Workday/Built In APIs, filters them, and writes new postings to the DynamoDB jobs table. A second EventBridge schedule triggers the Notifier Lambda, which scans recent jobs and sends an HTML digest via SES.">
 </picture>
 
 ## Observability
 
-<img src="docs/dashboard.png" alt="job-hunter CloudWatch dashboard: per-function Lambda invocations/errors/throttles for the Orchestrator, Worker, and Notifier, Lambda duration, SQS queue depth and DLQ backlog, DynamoDB consumed capacity, EventBridge Scheduler invocation attempts, SES send/bounce/complaint, a table of recent errors and warnings across all three functions, a daily jobs-written trend, and a table of ATS/backend fetch warnings.">
+<img src="docs/dashboard.png" alt="req-aggregator CloudWatch dashboard: per-function Lambda invocations/errors/throttles for the Orchestrator, Worker, and Notifier, Lambda duration, SQS queue depth and DLQ backlog, DynamoDB consumed capacity, EventBridge Scheduler invocation attempts, SES send/bounce/complaint, a table of recent errors and warnings across all three functions, a daily jobs-written trend, and a table of ATS/backend fetch warnings.">
 
 A `<prefix>-observability` CloudWatch dashboard (`main.tf`) tracks the pipeline end-to-end using only standard AWS-published metrics for Lambda, SQS, DynamoDB, EventBridge Scheduler, and SES, plus three CloudWatch Logs Insights widgets against the existing structured (Powertools JSON) logs — recent errors/warnings, jobs written per day, and ATS/backend fetch warnings (e.g. a company whose `ats` value doesn't match a supported backend). No custom metrics are emitted, so it stays within CloudWatch's free tier.
 
@@ -29,10 +29,10 @@ A `<prefix>-observability` CloudWatch dashboard (`main.tf`) tracks the pipeline 
 This repo is a standalone Terraform module (repo root = module root) — Lambda source and infrastructure together, with no backend or provider configuration of its own, so it drops straight into a consuming root configuration:
 
 ```hcl
-module "job_hunter" {
-  source = "github.com/ccliver/terraform-aws-job-hunter"
+module "req_aggregator" {
+  source = "github.com/ccliver/terraform-aws-req-aggregator"
 
-  prefix           = "job-hunter"
+  prefix           = "req-aggregator"
   ses_from_address = "you@yourdomain.com"
   ses_to_address   = "you@yourdomain.com"
   # ... see examples/complete/main.tf for every available variable
@@ -43,14 +43,14 @@ See [`examples/complete/`](examples/complete/) for a fully commented example set
 
 ## DynamoDB Tables
 
-### `job-hunter-companies`
+### `req-aggregator-companies`
 | Attribute    | Type | Role          |
 |-------------|------|---------------|
 | company_name | S    | Partition key |
 | careers_url  | S    | Careers page URL |
 | ats          | S    | ATS backend (`greenhouse`, `lever`, `workday`, `oracle`, or `builtin`) |
 
-### `job-hunter-jobs`
+### `req-aggregator-jobs`
 | Attribute     | Type | Role          |
 |--------------|------|---------------|
 | job_id        | S    | Partition key — SHA-256 of `company\|title\|url` |
@@ -179,7 +179,7 @@ No modules.
 | <a name="input_notifier_weekend_schedule"></a> [notifier\_weekend\_schedule](#input\_notifier\_weekend\_schedule) | EventBridge cron expression for the Notifier Lambda on weekends (30 min after orchestrator) | `string` | `"cron(30 8 ? * SAT-SUN *)"` | no |
 | <a name="input_orchestrator_weekday_schedule"></a> [orchestrator\_weekday\_schedule](#input\_orchestrator\_weekday\_schedule) | EventBridge cron expression for the Orchestrator Lambda on weekdays | `string` | `"cron(0 8-18/2 ? * MON-FRI *)"` | no |
 | <a name="input_orchestrator_weekend_schedule"></a> [orchestrator\_weekend\_schedule](#input\_orchestrator\_weekend\_schedule) | EventBridge cron expression for the Orchestrator Lambda on weekends | `string` | `"cron(0 8 ? * SAT-SUN *)"` | no |
-| <a name="input_prefix"></a> [prefix](#input\_prefix) | Prefix used to name every AWS resource (Lambda functions, DynamoDB tables, SQS queues, etc.), independent of the repo/module name | `string` | `"job-hunter"` | no |
+| <a name="input_prefix"></a> [prefix](#input\_prefix) | Prefix used to name every AWS resource (Lambda functions, DynamoDB tables, SQS queues, etc.), independent of the repo/module name | `string` | `"req-aggregator"` | no |
 | <a name="input_schedule_timezone"></a> [schedule\_timezone](#input\_schedule\_timezone) | IANA timezone the schedule cron expressions are evaluated in (EventBridge Scheduler handles DST automatically) | `string` | `"America/New_York"` | no |
 | <a name="input_ses_from_address"></a> [ses\_from\_address](#input\_ses\_from\_address) | Verified SES sender email address | `string` | n/a | yes |
 | <a name="input_ses_to_address"></a> [ses\_to\_address](#input\_ses\_to\_address) | Recipient email address for job digests | `string` | n/a | yes |

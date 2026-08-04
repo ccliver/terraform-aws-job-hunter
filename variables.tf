@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "prefix" {
   description = "Prefix used to name every AWS resource (Lambda functions, DynamoDB tables, SQS queues, etc.), independent of the repo/module name"
   type        = string
-  default     = "job-hunter"
+  default     = "req-aggregator"
 }
 
 variable "enable_dashboard" {

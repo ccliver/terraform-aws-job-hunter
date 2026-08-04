@@ -1,5 +1,5 @@
 locals {
-  prefix = "job-hunter-example"
+  prefix = "req-aggregator-example"
 }
 
 provider "aws" {
@@ -18,7 +18,7 @@ variable "aws_region" {
   default = "us-east-1"
 }
 
-module "job_hunter" {
+module "req_aggregator" {
   source = "../.."
 
   # --- Core ---
@@ -68,13 +68,13 @@ module "job_hunter" {
 }
 
 output "dashboard_url" {
-  value = module.job_hunter.dashboard_url
+  value = module.req_aggregator.dashboard_url
 }
 
 output "companies_table_name" {
-  value = module.job_hunter.companies_table_name
+  value = module.req_aggregator.companies_table_name
 }
 
 output "jobs_table_name" {
-  value = module.job_hunter.jobs_table_name
+  value = module.req_aggregator.jobs_table_name
 }

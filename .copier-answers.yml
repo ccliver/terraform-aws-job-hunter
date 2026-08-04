@@ -9,4 +9,4 @@ description: Automated job board monitor — a three-Lambda pipeline (orchestrat
 github_user_name: ccliver
 include_examples: true
 include_terratest: true
-module_name: job-hunter
+module_name: req-aggregator

@@ -65,7 +65,7 @@ def _build_email_body(jobs: list[dict[str, Any]]) -> tuple[str, str]:
         by_company[job["company"]].append(job)
 
     date_str = datetime.now(UTC).strftime("%B %-d, %Y")
-    header = f"Job Hunter Digest — {len(jobs)} new posting(s), {date_str}"
+    header = f"Req Aggregator Digest — {len(jobs)} new posting(s), {date_str}"
 
     text_sections = []
     html_sections = []
@@ -117,7 +117,7 @@ def _build_email_body(jobs: list[dict[str, Any]]) -> tuple[str, str]:
         '<table role="presentation" width="600" cellpadding="0" cellspacing="0" '
         'style="background-color:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;">'
         '<tr><td style="background-color:#1a1a2e;padding:24px 32px;">'
-        f'<p style="margin:0;color:#ffffff;font-size:20px;font-weight:600;">Job Hunter Digest</p>'
+        f'<p style="margin:0;color:#ffffff;font-size:20px;font-weight:600;">Req Aggregator Digest</p>'
         f'<p style="margin:4px 0 0;color:#a0a0b8;font-size:13px;">'
         f"{len(jobs)} new posting(s) &middot; {date_str}</p></td></tr>"
         f'<tr><td style="padding:8px 32px 32px;">{"".join(html_sections)}</td></tr>'
@@ -159,7 +159,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         Source=from_address,
         Destination={"ToAddresses": [to_address]},
         Message={
-            "Subject": {"Data": f"Job Hunter: {len(jobs)} new posting(s) found"},
+            "Subject": {"Data": f"Req Aggregator: {len(jobs)} new posting(s) found"},
             "Body": {
                 "Text": {"Data": text_body},
                 "Html": {"Data": html_body},
