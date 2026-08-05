@@ -27,3 +27,6 @@ build/
 
 # Real curated company list (companies.json in the repo is a generic example)
 companies/*.local.json
+
+*.swp
+*.log

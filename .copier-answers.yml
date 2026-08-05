@@ -1,4 +1,4 @@
-_commit: v1.1.2
+_commit: v1.2.0
 _src_path: git@github.com:ccliver/copier-terraform-module-template.git
 author_full_name: Carl Cliver
 aws_provider_version: ~> 6
