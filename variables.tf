@@ -29,23 +29,23 @@ variable "ses_to_address" {
 variable "orchestrator_weekday_schedule" {
   description = "EventBridge cron expression for the Orchestrator Lambda on weekdays"
   type        = string
-  default     = "cron(0 8-18/2 ? * MON-FRI *)" # every 2 hrs, 8am-6pm UTC, Mon-Fri
+  default     = "cron(0 9 ? * MON-FRI *)" # once at 9am, Mon-Fri
 }
 
 variable "orchestrator_weekend_schedule" {
-  description = "EventBridge cron expression for the Orchestrator Lambda on weekends"
+  description = "EventBridge cron expression for the Orchestrator Lambda on weekends. Set to null to disable weekend runs entirely."
   type        = string
-  default     = "cron(0 8 ? * SAT-SUN *)" # once at 8am UTC, Sat-Sun
+  default     = null
 }
 
 variable "notifier_weekday_schedule" {
   description = "EventBridge cron expression for the Notifier Lambda on weekdays (30 min after orchestrator)"
   type        = string
-  default     = "cron(30 8-18/2 ? * MON-FRI *)"
+  default     = "cron(30 9 ? * MON-FRI *)"
 }
 
 variable "notifier_weekend_schedule" {
-  description = "EventBridge cron expression for the Notifier Lambda on weekends (30 min after orchestrator)"
+  description = "EventBridge cron expression for the Notifier Lambda on weekends (30 min after orchestrator). Set to null to disable weekend runs entirely."
   type        = string
   default     = "cron(30 8 ? * SAT-SUN *)"
 }

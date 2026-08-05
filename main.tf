@@ -365,6 +365,8 @@ resource "aws_scheduler_schedule" "orchestrator_weekday" {
 }
 
 resource "aws_scheduler_schedule" "orchestrator_weekend" {
+  count = var.orchestrator_weekend_schedule != null ? 1 : 0
+
   name                         = "${local.prefix}-orchestrator-weekend-schedule"
   schedule_expression          = var.orchestrator_weekend_schedule
   schedule_expression_timezone = var.schedule_timezone
@@ -395,6 +397,8 @@ resource "aws_scheduler_schedule" "notifier_weekday" {
 }
 
 resource "aws_scheduler_schedule" "notifier_weekend" {
+  count = var.notifier_weekend_schedule != null ? 1 : 0
+
   name                         = "${local.prefix}-notifier-weekend-schedule"
   schedule_expression          = var.notifier_weekend_schedule
   schedule_expression_timezone = var.schedule_timezone
